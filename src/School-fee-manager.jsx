@@ -340,6 +340,12 @@ export default function App() {
   const [loginInput, setLoginInput] = useState({ user: "", pass: "" });
   const [loginError, setLoginError] = useState("");
   const [schoolsLoading, setSchoolsLoading] = useState(true);
+  // Checked once, synchronously, on first render — before the async schools
+  // fetch even starts — purely so we know whether to show a brief "loading"
+  // state instead of flashing the login screen while we wait to find out if
+  // there's a session to restore. This does NOT log anyone in by itself;
+  // loadSchools() still does the real restoration once real data has loaded.
+  const [hasSavedSession] = useState(() => !!loadSession());
   const [schoolsLoadError, setSchoolsLoadError] = useState("");
   const [studentsLoading, setStudentsLoading] = useState(false);
 
@@ -523,10 +529,12 @@ export default function App() {
         } else if (session.role === "admin" && loaded[session.schoolId]) {
           setActiveSchoolId(session.schoolId);
           setCurrentUser({ role: "admin" });
+          if (session.tab) setTab(session.tab);
           loadStudentsForSchool(session.schoolId);
         } else if (session.role === "parent" && loaded[session.schoolId]) {
           setActiveSchoolId(session.schoolId);
           setCurrentUser(session);
+          if (session.tab) setTab(session.tab);
           loadStudentsForSchool(session.schoolId);
         } else {
           // Saved session no longer matches anything real — clear it
@@ -538,6 +546,18 @@ export default function App() {
     loadSchools();
     return () => { cancelled = true; };
   }, []);
+
+  // ── Keep the saved session's "tab" in sync with the real one ───
+  // So that refreshing the page while on, say, the Students screen brings
+  // you back to Students rather than always landing on the Dashboard.
+  // Only writes once someone is actually logged in — merges onto whatever
+  // session is already saved (role/schoolId/etc.) rather than overwriting
+  // those.
+  useEffect(() => {
+    if (!currentUser) return;
+    const existing = loadSession();
+    if (existing) saveSession({ ...existing, tab });
+  }, [tab, currentUser]);
 
   // ── Load real pending signups from Supabase ────────────────────
   // Same pattern as loadSchools above — runs once on mount, replaces the
@@ -2746,6 +2766,17 @@ export default function App() {
   const grid = (desktopCols, mobileCols = 1) => ({ display: "grid", gridTemplateColumns: isMobile ? `repeat(${mobileCols}, 1fr)` : `repeat(${desktopCols}, 1fr)` });
 
   // ════════════════════════ LOGIN SCREEN ════════════════════════
+  if (!currentUser && hasSavedSession && schoolsLoading) {
+    // We know there's a saved session waiting to be checked, but the real
+    // schools data hasn't loaded yet — show a brief, neutral loading state
+    // instead of flashing the login form, which would otherwise show for a
+    // moment even though the person is about to be logged back in anyway.
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
+        <div style={{ color: "#fff", fontSize: 15, fontWeight: 600, opacity: 0.85 }}>🏫 FeeTrack UG</div>
+      </div>
+    );
+  }
   if (!currentUser) {
     return (
       <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Plus Jakarta Sans',sans-serif", padding: 20 }}>
