@@ -428,10 +428,9 @@ export default function App() {
   const bankFileRef = useRef(null);
 
   // ── School signup / approval system ────────────────────────────
-  const [pendingSchools, setPendingSchools] = useState([
-    { id: "p1", schoolName: "Jinja Progressive College", location: "Jinja", principal: "Mrs. Akello Joan", phone: "0772-555-101", email: "info@jinjapc.ac.ug", students: "350", submittedAt: "2026-06-10", status: "pending" },
-    { id: "p2", schoolName: "Masaka Modern High School", location: "Masaka", principal: "Mr. Lubega Tom", phone: "0701-555-202", email: "admin@masakamhs.ac.ug", students: "480", submittedAt: "2026-06-11", status: "pending" },
-  ]);
+  // Starts empty — populated from the real Supabase pending_signups table by
+  // the loadPendingSignups effect below, not hardcoded fake demo entries.
+  const [pendingSchools, setPendingSchools] = useState([]);
   const [signupForm, setSignupForm] = useState({ schoolName: "", location: "", principal: "", phone: "", email: "", students: "", schoolType: "secondary", billingCycle: "monthly", username: "", password: "" });
   const [signupSubmitted, setSignupSubmitted] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
@@ -490,6 +489,39 @@ export default function App() {
       setSubscriptionRefresh(r => r + 1);
     }
     loadSchools();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Load real pending signups from Supabase ────────────────────
+  // Same pattern as loadSchools above — runs once on mount, replaces the
+  // fake demo signup requests with whatever's actually been submitted
+  // through the real signup form and stored in Supabase.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPendingSignups() {
+      const { data, error } = await supabase.from("pending_signups").select("*").order("submitted_at", { ascending: false });
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load pending signups:", error.message);
+        return;
+      }
+      setPendingSchools((data || []).map(row => ({
+        id: row.id,
+        schoolName: row.school_name,
+        location: row.location,
+        principal: row.principal,
+        phone: row.phone,
+        email: row.email,
+        students: row.students_estimate,
+        schoolType: row.school_type,
+        billingCycle: row.billing_cycle,
+        username: row.requested_username,
+        password: row.requested_password,
+        submittedAt: row.submitted_at ? row.submitted_at.split("T")[0] : "",
+        status: row.status,
+      })));
+    }
+    loadPendingSignups();
     return () => { cancelled = true; };
   }, []);
 
@@ -683,28 +715,78 @@ export default function App() {
 
   const deleteReq = (id) => { if (isReadOnly) return notify("Account is in read-only mode.", "err"); setRequirements(prev => prev.filter(r => r.id !== id)); notify("Requirement removed"); };
 
-  const handleSignupSubmit = () => {
-    const { schoolName, location, principal, phone, email, students, schoolType, username, password } = signupForm;
+  const handleSignupSubmit = async () => {
+    const { schoolName, location, principal, phone, email, students, schoolType, billingCycle, username, password } = signupForm;
     if (!schoolName.trim() || !principal.trim() || !phone.trim() || !username.trim() || !password.trim()) {
       return notify("Please fill all required fields", "err");
     }
     if (password.length < 6) return notify("Password must be at least 6 characters", "err");
+
+    const { data, error } = await supabase.from("pending_signups").insert({
+      school_name: schoolName, location, principal, phone, email,
+      students_estimate: students, school_type: schoolType, billing_cycle: billingCycle || "monthly",
+      requested_username: username, requested_password: password,
+      status: "pending",
+    }).select().single();
+
+    if (error) {
+      return notify(`Could not submit signup: ${error.message}`, "err");
+    }
+
     const newPending = {
-      id: `p${Date.now()}`,
+      id: data.id,
       schoolName, location, principal, phone, email, students, schoolType,
       username, password,
-      submittedAt: new Date().toISOString().split("T")[0],
+      submittedAt: data.submitted_at ? data.submitted_at.split("T")[0] : new Date().toISOString().split("T")[0],
       status: "pending",
     };
     setPendingSchools(prev => [...prev, newPending]);
     setSignupSubmitted(true);
   };
 
-  const approveSchool = (id) => {
+  const approveSchool = async (id) => {
     const school = pendingSchools.find(p => p.id === id);
     if (!school) return;
-    const newSchoolId = Math.max(...Object.keys(SCHOOLS_DATA).map(Number)) + 1;
     const autoPlan = suggestPlan(school.students);
+    const billingRef = `FT-${(school.schoolName || "SCHOOL").replace(/[^A-Za-z]/g, "").toUpperCase().slice(0, 6)}-${Date.now().toString().slice(-4)}`;
+
+    // Create the real school row in Supabase first — id is generated by the
+    // database (a uuid), not made up locally, so it's guaranteed to be a
+    // real, valid, unique school id from the moment it exists.
+    const { data: newSchoolRow, error: insertError } = await supabase.from("schools").insert({
+      name: school.schoolName,
+      location: school.location || "Uganda",
+      principal: school.principal,
+      phone: school.phone,
+      logo: "🏫",
+      school_type: school.schoolType || "secondary",
+      setup_complete: false,
+      admin_username: school.username || "admin",
+      admin_password: school.password || "school123",
+      plan: autoPlan,
+      billing_cycle: school.billingCycle || "monthly",
+      subscription_status: "Active",
+      next_billing_date: null, // trial starts on first login, not at approval
+      last_payment_date: null,
+      is_trial: true,
+      trial_activated: false,
+      billing_ref: billingRef,
+    }).select().single();
+
+    if (insertError) {
+      return notify(`Could not approve school: ${insertError.message}`, "err");
+    }
+
+    // Mark the signup request as approved in Supabase too, so it doesn't
+    // show up as still-pending if the page is reloaded.
+    const { error: updateError } = await supabase.from("pending_signups").update({ status: "approved" }).eq("id", id);
+    if (updateError) {
+      // The school itself was created successfully — this second failure is
+      // less critical, so warn rather than block, since the real work is done.
+      notify(`School created, but couldn't update signup status: ${updateError.message}`, "err");
+    }
+
+    const newSchoolId = newSchoolRow.id;
     SCHOOLS_DATA[newSchoolId] = {
       id: newSchoolId, name: school.schoolName, location: school.location || "Uganda",
       principal: school.principal, phone: school.phone, logo: "🏫",
@@ -712,10 +794,10 @@ export default function App() {
       setupComplete: false,
       schoolType: school.schoolType || "secondary",
       plan: autoPlan, billingCycle: school.billingCycle || "monthly", customPrice: null, customPriceNote: "", subscriptionStatus: "Active",
-      nextBillingDate: null, // trial starts on first login, not at approval
-      lastPaymentDate: null, isTrial: true, trialActivated: false,
-      billingRef: `FT-${(school.schoolName || "SCHOOL").replace(/[^A-Za-z]/g, "").toUpperCase().slice(0, 6)}-${String(newSchoolId).padStart(3, "0")}`,
+      nextBillingDate: null, lastPaymentDate: null, isTrial: true, trialActivated: false,
+      billingRef,
     };
+    setSubscriptionRefresh(r => r + 1); // force re-render now that SCHOOLS_DATA changed
     setAllStudents(prev => ({ ...prev, [newSchoolId]: [] }));
     setAllExpenses(prev => ({ ...prev, [newSchoolId]: [] }));
     setAllAlumni(prev => ({ ...prev, [newSchoolId]: [] }));
