@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid, PieChart, Pie, Cell } from "recharts";
 import * as XLSX from "xlsx";
+import { supabase } from "./supabaseClient";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // Generate Term 1/2/3 for a range of years so rollover/promotion always has valid next-terms
@@ -199,11 +200,14 @@ const minPlanForCount = (count) => {
 // Plan order for comparing "is this an upgrade" — never auto-downgrade
 const PLAN_ORDER = ["Starter", "Standard", "Premium"];
 
-const SCHOOLS_DATA = {
-  1: { id: 1, name: "Kampala Senior Secondary School", location: "Kampala", principal: "Mr. Ssempijja Robert", phone: "0772-000-001", logo: "🏫", adminUsername: "admin", adminPassword: "admin123", setupComplete: true, plan: "Standard", billingCycle: "monthly", subscriptionStatus: "Active", nextBillingDate: "2026-07-10", lastPaymentDate: "2026-06-10", billingRef: "FT-KSSS-001", customPrice: null, customPriceNote: "" },
-  2: { id: 2, name: "Mukono High School", location: "Mukono", principal: "Mrs. Nalwoga Grace", phone: "0701-000-002", logo: "🏫", adminUsername: "mukono_admin", adminPassword: "mukono123", setupComplete: true, plan: "Premium", billingCycle: "term", subscriptionStatus: "Active", nextBillingDate: "2026-08-08", lastPaymentDate: "2026-05-08", billingRef: "FT-MHS-002", customPrice: null, customPriceNote: "" },
-  3: { id: 3, name: "Entebbe S.S.S", location: "Entebbe", principal: "Mr. Kato David", phone: "0752-000-003", logo: "🏫", adminUsername: "entebbe_admin", adminPassword: "entebbe123", setupComplete: true, plan: "Starter", billingCycle: "monthly", subscriptionStatus: "Active", nextBillingDate: "2026-05-20", lastPaymentDate: "2026-04-20", billingRef: "FT-ESSS-003", customPrice: 70000, customPriceNote: "Negotiated rate — early adopter, approved by admin" },
-};
+// Populated at runtime from the real Supabase `schools` table (see the
+// loadSchoolsFromSupabase effect below) — starts empty, not with fake demo
+// data, since this now reflects real schools that have actually signed up.
+// Kept as a plain mutable object (not React state) because many existing
+// functions throughout this file already mutate it directly and then bump
+// `subscriptionRefresh` to force a re-render — changing that pattern now
+// would mean touching dozens of call sites for no real benefit.
+let SCHOOLS_DATA = {};
 
 // ── Initial Students ──────────────────────────────────────────────────────────
 const makeStudents = (schoolId) => [
@@ -253,7 +257,7 @@ const fmtDateTime = (d) => new Date(d).toLocaleString("en-UG", { day: "2-digit",
 
 // Compute live subscription status: Active / Grace Period / Suspended
 const getSubscriptionInfo = (school) => {
-  if (!school.nextBillingDate) return { status: "Active", daysOverdue: 0 };
+  if (!school || !school.nextBillingDate) return { status: "Active", daysOverdue: 0 };
   const due = new Date(school.nextBillingDate);
   const now = new Date();
   const diffDays = Math.floor((now - due) / (1000 * 60 * 60 * 24));
@@ -314,11 +318,17 @@ export default function App() {
   const [loginScreen, setLoginScreen] = useState("admin"); // "admin"|"parent"|"school-select"
   const [loginInput, setLoginInput] = useState({ user: "", pass: "" });
   const [loginError, setLoginError] = useState("");
+  const [schoolsLoading, setSchoolsLoading] = useState(true);
+  const [schoolsLoadError, setSchoolsLoadError] = useState("");
 
-  const [allStudents, setAllStudents] = useState({ 1: makeStudents(1), 2: makeStudents(2), 3: makeStudents(3) });
-  const [allExpenses, setAllExpenses] = useState({ 1: makeExpenses(1), 2: makeExpenses(2), 3: makeExpenses(3) });
-  const [allStaff, setAllStaff] = useState({ 1: makeStaff(1), 2: makeStaff(2), 3: makeStaff(3) });
-  const [allStaffPayments, setAllStaffPayments] = useState({ 1: makeStaffPayments(1), 2: makeStaffPayments(2), 3: makeStaffPayments(3) });
+  // Start empty — students/expenses/staff/staff-payments tables aren't migrated to
+  // Supabase yet (only schools + students are, as of this step). Once each table is
+  // migrated, this will load from Supabase the same way schools does below. Until
+  // then, a real school correctly starts with nothing rather than fake demo data.
+  const [allStudents, setAllStudents] = useState({});
+  const [allExpenses, setAllExpenses] = useState({});
+  const [allStaff, setAllStaff] = useState({});
+  const [allStaffPayments, setAllStaffPayments] = useState({});
   const [smsLog, setSmsLog] = useState([]);
 
   const [tab, setTab] = useState("dashboard");
@@ -426,6 +436,63 @@ export default function App() {
   const [signupSubmitted, setSignupSubmitted] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [subscriptionRefresh, setSubscriptionRefresh] = useState(0); // bump to force re-render after SCHOOLS_DATA mutation
+
+  // ── Load real schools from Supabase ────────────────────────────
+  // Runs once when the app first loads. Populates the module-level SCHOOLS_DATA
+  // object (declared near the top of this file) with real rows from the
+  // database, converting each row's snake_case columns (e.g. admin_username)
+  // into the camelCase shape the rest of the app already expects (adminUsername)
+  // — so every existing function that reads SCHOOLS_DATA[id].adminUsername etc.
+  // keeps working completely unchanged.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSchools() {
+      setSchoolsLoading(true);
+      setSchoolsLoadError("");
+      const { data, error } = await supabase.from("schools").select("*");
+      if (cancelled) return;
+      if (error) {
+        setSchoolsLoadError(error.message);
+        setSchoolsLoading(false);
+        return;
+      }
+      const loaded = {};
+      (data || []).forEach(row => {
+        loaded[row.id] = {
+          id: row.id,
+          name: row.name,
+          location: row.location,
+          principal: row.principal,
+          phone: row.phone,
+          notifyEmail: row.notify_email || "",
+          logo: row.logo || "🏫",
+          schoolType: row.school_type || "secondary",
+          streams: row.streams || {},
+          setupComplete: row.setup_complete,
+          adminUsername: row.admin_username,
+          adminPassword: row.admin_password,
+          plan: row.plan || "Starter",
+          billingCycle: row.billing_cycle || "monthly",
+          customPrice: row.custom_price,
+          customPriceNote: row.custom_price_note || "",
+          subscriptionStatus: row.subscription_status || "Active",
+          isTrial: row.is_trial,
+          trialActivated: row.trial_activated,
+          trialStartDate: row.trial_start_date,
+          nextBillingDate: row.next_billing_date,
+          lastPaymentDate: row.last_payment_date,
+          paymentNoticeFreeze: row.payment_notice_freeze || false,
+          billingRef: row.billing_ref,
+        };
+      });
+      SCHOOLS_DATA = loaded;
+      setSchoolsLoading(false);
+      setSubscriptionRefresh(r => r + 1);
+    }
+    loadSchools();
+    return () => { cancelled = true; };
+  }, []);
+
   const [superAdminTab, setSuperAdminTab] = useState("signups");
   const [expandedId, setExpandedId] = useState(null);
   const [expandedAlumni, setExpandedAlumni] = useState(null);
@@ -1308,7 +1375,7 @@ export default function App() {
   // ── Derived Data ───────────────────────────────────────────────
   const subInfo = getSubscriptionInfo(school);
   const isReadOnly = subInfo.status === "Suspended";
-  const getClassStreams = (cls) => (school.streams && school.streams[cls]) || [];
+  const getClassStreams = (cls) => (school?.streams && school.streams[cls]) || [];
   const students = allStudents[activeSchoolId] || [];
   const expenses = allExpenses[activeSchoolId] || [];
   const staff = allStaff[activeSchoolId] || [];
