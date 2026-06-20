@@ -2037,15 +2037,33 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
-  const handleBulkImport = () => {
+  const handleBulkImport = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const validRows = bulkRows.filter(r => r.valid);
-    const newStudents = validRows.map((r, i) => ({
-      id: `${activeSchoolId}-bulk-${Date.now()}-${i}`,
-      schoolId: activeSchoolId,
-      name: r.name, class: r.class, gender: r.gender, category: r.category,
-      parent: r.parent, phone: r.phone,
-      arrears: r.arrears, bursary: r.bursary || null, customFee: r.customFee || null, payments: [],
+    if (validRows.length === 0) return notify("No valid rows to import", "err");
+
+    const { data: insertedRows, error: insertError } = await supabase.from("students").insert(
+      validRows.map(r => ({
+        school_id: activeSchoolId,
+        name: r.name, class: r.class, gender: r.gender, category: r.category,
+        parent_name: r.parent, phone: r.phone,
+        arrears: r.arrears || 0,
+        bursary_type: r.bursary?.type || null, bursary_value: r.bursary?.value || null, bursary_reason: r.bursary?.reason || null,
+        custom_fee: r.customFee || null,
+      }))
+    ).select();
+
+    if (insertError) {
+      return notify(`Could not import students: ${insertError.message}`, "err");
+    }
+
+    const newStudents = (insertedRows || []).map(row => ({
+      id: row.id, schoolId: row.school_id,
+      name: row.name, class: row.class, gender: row.gender, category: row.category || "Day Scholar",
+      parent: row.parent_name || "", phone: row.phone || "",
+      arrears: row.arrears || 0,
+      bursary: row.bursary_type ? { type: row.bursary_type, value: row.bursary_value, reason: row.bursary_reason || "" } : null,
+      customFee: row.custom_fee, payments: [],
     }));
     setAllStudents(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), ...newStudents] }));
     checkAutoUpgrade(activeSchoolId, students.length + newStudents.length);
