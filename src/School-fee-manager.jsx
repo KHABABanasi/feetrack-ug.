@@ -264,8 +264,13 @@ const fmtDateTime = (d) => new Date(d).toLocaleString("en-UG", { day: "2-digit",
 // saved, rather than trusting any cached data — only the *fact* of being
 // logged in is remembered, not stale information.
 const SESSION_KEY = "feetrack_session";
+// After this many minutes with no real activity (clicks, typing, touches,
+// scrolling) on the page, the session is treated as expired and the person
+// is logged out automatically — similar to how banking/finance apps behave,
+// so a phone left open and unattended doesn't stay logged in indefinitely.
+const INACTIVITY_TIMEOUT_MINUTES = 30;
 const saveSession = (session) => {
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch { /* storage unavailable — fail silently, just won't persist */ }
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, lastActivity: Date.now() })); } catch { /* storage unavailable — fail silently, just won't persist */ }
 };
 const loadSession = () => {
   try {
@@ -275,6 +280,23 @@ const loadSession = () => {
 };
 const clearSession = () => {
   try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+};
+// Bumps just the lastActivity timestamp on an already-saved session, without
+// touching role/schoolId/tab — called frequently (on clicks/keys/etc.), so
+// this needs to be cheap and must NOT call saveSession (which would re-stamp
+// activity unconditionally even when nobody is logged in).
+const touchSessionActivity = () => {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return;
+    const session = JSON.parse(raw);
+    session.lastActivity = Date.now();
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch { /* ignore */ }
+};
+const isSessionExpired = (session) => {
+  if (!session || !session.lastActivity) return false; // older/missing timestamp — don't punish, just let it through once
+  return Date.now() - session.lastActivity > INACTIVITY_TIMEOUT_MINUTES * 60 * 1000;
 };
 
 const getSubscriptionInfo = (school) => {
@@ -522,7 +544,11 @@ export default function App() {
       // removed since the session was saved, this safely does nothing
       // rather than restoring into a broken state.
       const session = loadSession();
-      if (session) {
+      if (session && isSessionExpired(session)) {
+        // Too long since the last real activity — treat exactly like a
+        // manual logout rather than restoring a stale session.
+        clearSession();
+      } else if (session) {
         if (session.role === "superadmin") {
           setIsSuperAdmin(true);
           setCurrentUser({ role: "superadmin" });
@@ -546,6 +572,38 @@ export default function App() {
     loadSchools();
     return () => { cancelled = true; };
   }, []);
+
+  // ── Auto-logout after a period of inactivity ────────────────────
+  // Two parts: (1) any real activity (click/key/touch/scroll) bumps the
+  // saved session's timestamp, and (2) a periodic check, while the app
+  // stays open, logs the person out the moment too much time has passed
+  // since the last real activity — not just on the next reload. logout()
+  // itself is declared further down the file as a plain const, but since
+  // this effect's callback only runs later (on a timer/event, after the
+  // whole component body has already evaluated once), referencing it here
+  // is safe — same pattern already used elsewhere in this file.
+  useEffect(() => {
+    if (!currentUser) return;
+    const bump = () => touchSessionActivity();
+    const events = ["click", "keydown", "touchstart", "scroll", "mousemove"];
+    events.forEach(e => window.addEventListener(e, bump, { passive: true }));
+
+    const interval = setInterval(() => {
+      const session = loadSession();
+      if (isSessionExpired(session)) {
+        notify("You were logged out after a period of inactivity", "err");
+        // Brief delay before actually switching screens — gives the toast
+        // a real chance to paint before the view jumps to the login
+        // screen, which has no toast element of its own to show it in.
+        setTimeout(logout, 600);
+      }
+    }, 60 * 1000); // checked once a minute — frequent enough to feel responsive, cheap enough not to matter
+
+    return () => {
+      events.forEach(e => window.removeEventListener(e, bump));
+      clearInterval(interval);
+    };
+  }, [currentUser]);
 
   // ── Keep the saved session's "tab" in sync with the real one ───
   // So that refreshing the page while on, say, the Students screen brings
