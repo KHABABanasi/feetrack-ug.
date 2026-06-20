@@ -320,6 +320,7 @@ export default function App() {
   const [loginError, setLoginError] = useState("");
   const [schoolsLoading, setSchoolsLoading] = useState(true);
   const [schoolsLoadError, setSchoolsLoadError] = useState("");
+  const [studentsLoading, setStudentsLoading] = useState(false);
 
   // Start empty — students/expenses/staff/staff-payments tables aren't migrated to
   // Supabase yet (only schools + students are, as of this step). Once each table is
@@ -524,6 +525,88 @@ export default function App() {
     loadPendingSignups();
     return () => { cancelled = true; };
   }, []);
+
+  // ── Load real students for the logged-in school ─────────────────
+  // Unlike schools/pending-signups (loaded once at startup), this depends
+  // on activeSchoolId, since we don't know which school's students to load
+  // until someone actually logs in. The `typeof activeSchoolId === "number"`
+  // check skips the very first render, where activeSchoolId still holds its
+  // placeholder default (1) from before any real school is selected — real
+  // school ids are uuid strings, never plain numbers, so this distinguishes
+  // "nobody's logged in yet" from "a real school is now active."
+  useEffect(() => {
+    if (typeof activeSchoolId === "number") return;
+    let cancelled = false;
+    async function loadStudents() {
+      const { data, error } = await supabase.from("students").select("*").eq("school_id", activeSchoolId);
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load students:", error.message);
+        return;
+      }
+      const loaded = (data || []).map(row => ({
+        id: row.id,
+        schoolId: row.school_id,
+        name: row.name,
+        class: row.class,
+        stream: row.stream || "",
+        gender: row.gender,
+        category: row.category || "Day Scholar",
+        parent: row.parent_name,
+        phone: row.phone,
+        arrears: row.arrears || 0,
+        bursary: row.bursary_type ? { type: row.bursary_type, value: row.bursary_value, reason: row.bursary_reason } : null,
+        customFee: row.custom_fee,
+        photo: row.photo_url || null,
+        payments: [], // filled in by the loadPayments effect below, once it resolves
+      }));
+      setAllStudents(prev => ({ ...prev, [activeSchoolId]: loaded }));
+    }
+    loadStudents();
+    return () => { cancelled = true; };
+  }, [activeSchoolId]);
+
+  // ── Load real payments for the logged-in school, attach to students ──
+  // Payments live in their own Supabase table (not embedded in each student
+  // row), so they're fetched separately and then matched onto the right
+  // student by student_id — mirroring the shape the rest of the app already
+  // expects (each student object having its own `payments` array).
+  useEffect(() => {
+    if (typeof activeSchoolId === "number") return;
+    let cancelled = false;
+    async function loadPayments() {
+      const { data, error } = await supabase.from("payments").select("*").eq("school_id", activeSchoolId);
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load payments:", error.message);
+        return;
+      }
+      const byStudent = {};
+      (data || []).forEach(row => {
+        if (!row.student_id) return; // recovery payments for alumni aren't attached to a current student
+        if (!byStudent[row.student_id]) byStudent[row.student_id] = [];
+        byStudent[row.student_id].push({
+          id: row.receipt_no,
+          date: row.payment_date,
+          amount: row.amount,
+          method: row.method,
+          receivedBy: row.received_by,
+          term: row.term,
+          _dbId: row.id, // the real Supabase row id, needed later for edit/delete
+        });
+      });
+      setAllStudents(prev => {
+        const current = prev[activeSchoolId] || [];
+        if (current.length === 0) return prev; // students haven't loaded yet — nothing to attach payments to
+        return {
+          ...prev,
+          [activeSchoolId]: current.map(s => ({ ...s, payments: byStudent[s.id] || [] })),
+        };
+      });
+    }
+    loadPayments();
+    return () => { cancelled = true; };
+  }, [activeSchoolId, allStudents[activeSchoolId]?.length]);
 
   const [superAdminTab, setSuperAdminTab] = useState("signups");
   const [expandedId, setExpandedId] = useState(null);
@@ -1230,11 +1313,20 @@ export default function App() {
   };
 
   // ── Edit / Delete Payment ─────────────────────────────────────
-  const handleEditPayment = () => {
+  const handleEditPayment = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const amt = parseInt(editPayAmt);
     if (!amt || amt <= 0) return notify("Enter valid amount", "err");
     const { student, payment } = showEditPayment;
+
+    const { error: updateError } = await supabase.from("payments")
+      .update({ amount: amt })
+      .eq("school_id", activeSchoolId)
+      .eq("receipt_no", payment.id);
+    if (updateError) {
+      return notify(`Could not correct payment: ${updateError.message}`, "err");
+    }
+
     setAllStudents(prev => ({
       ...prev,
       [activeSchoolId]: prev[activeSchoolId].map(s =>
@@ -1253,7 +1345,14 @@ export default function App() {
       title: "Delete Payment",
       message: `Delete payment ${paymentId}? This cannot be undone.`,
       danger: true,
-      onConfirm: () => {
+      onConfirm: async () => {
+        const { error: deleteError } = await supabase.from("payments")
+          .delete()
+          .eq("school_id", activeSchoolId)
+          .eq("receipt_no", paymentId);
+        if (deleteError) {
+          return notify(`Could not delete payment: ${deleteError.message}`, "err");
+        }
         setAllStudents(prev => ({
           ...prev,
           [activeSchoolId]: prev[activeSchoolId].map(s =>
@@ -1264,6 +1363,7 @@ export default function App() {
       },
     });
   };
+
 
   // ── Manual Move to Alumni (mid-term transfer/dropout) ─────────
   const handleMoveToAlumni = () => {
@@ -1522,6 +1622,61 @@ export default function App() {
   });
 
   // ── Handlers ──────────────────────────────────────────────────
+  // ── Load real students + their payments from Supabase ──────────
+  // Called right after a school admin successfully logs in. Fetches both
+  // tables, then merges each student's payments into a `payments` array on
+  // the student object — matching the exact in-app shape every existing
+  // student function (add/edit/promote/etc.) already expects, so none of
+  // that existing logic needs to change. Computes `arrears` fresh from
+  // each student's actual saved value (now a real Supabase column) rather
+  // than the old hardcoded demo arrears.
+  const loadStudentsForSchool = async (schoolId) => {
+    setStudentsLoading(true);
+    const [studentsResult, paymentsResult] = await Promise.all([
+      supabase.from("students").select("*").eq("school_id", schoolId),
+      supabase.from("payments").select("*").eq("school_id", schoolId),
+    ]);
+    if (studentsResult.error) {
+      notify(`Could not load students: ${studentsResult.error.message}`, "err");
+      setStudentsLoading(false);
+      return;
+    }
+    if (paymentsResult.error) {
+      notify(`Could not load payment history: ${paymentsResult.error.message}`, "err");
+    }
+    const paymentsByStudent = {};
+    (paymentsResult.data || []).forEach(p => {
+      if (!paymentsByStudent[p.student_id]) paymentsByStudent[p.student_id] = [];
+      paymentsByStudent[p.student_id].push({
+        id: p.receipt_no, dbId: p.id, date: p.payment_date, amount: p.amount,
+        method: p.method, receivedBy: p.received_by || "", term: p.term,
+      });
+    });
+    // Advance the in-memory receipt counter past the highest real receipt
+    // number already saved for this school, so it can't generate a number
+    // that collides with one that already exists in the database — the
+    // counter itself has no memory between page loads, only the database does.
+    (paymentsResult.data || []).forEach(p => {
+      const match = /^RCP-(\d+)$/.exec(p.receipt_no || "");
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n >= rcptN) rcptN = n + 1;
+      }
+    });
+    const loadedStudents = (studentsResult.data || []).map(row => ({
+      id: row.id, schoolId: row.school_id,
+      name: row.name, class: row.class, stream: row.stream || "", gender: row.gender,
+      category: row.category || "Day Scholar", parent: row.parent_name || "", phone: row.phone || "",
+      arrears: row.arrears || 0,
+      bursary: row.bursary_type ? { type: row.bursary_type, value: row.bursary_value, reason: row.bursary_reason || "" } : null,
+      customFee: row.custom_fee,
+      photo: row.photo_url || null,
+      payments: paymentsByStudent[row.id] || [],
+    }));
+    setAllStudents(prev => ({ ...prev, [schoolId]: loadedStudents }));
+    setStudentsLoading(false);
+  };
+
   const handleLogin = () => {
     if (loginScreen === "admin") {
       // Super admin login
@@ -1546,12 +1701,11 @@ export default function App() {
         }
         setActiveSchoolId(matchedSchool.id);
         setCurrentUser({ role: "admin" }); setLoginError("");
+        loadStudentsForSchool(matchedSchool.id);
         return;
       }
       // Default demo credentials
-      if (loginInput.user === adminCreds.username && loginInput.pass === adminCreds.password) {
-        setCurrentUser({ role: "admin" }); setLoginError("");
-      } else setLoginError(`Invalid credentials. If your school just signed up, wait for approval.`);
+      setLoginError(`Invalid credentials. If your school just signed up, wait for approval.`);
     } else {
       // parent login: phone number as username, last 4 digits as pin
       const myChildren = students.filter(s => s.phone.replace(/-/g, "") === loginInput.user.replace(/-/g, ""));
@@ -1563,13 +1717,22 @@ export default function App() {
     }
   };
 
-  const handlePay = () => {
+  const handlePay = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const amount = parseInt(payAmt.replace(/,/g, ""));
     if (!amount || amount <= 0) return notify("Enter valid amount", "err");
     const bal = getBalance(showPay, currentTerm).balance;
     if (amount > bal) return notify(`Max payable is ${fmt(bal)}`, "err");
     const rcpt = nextRcpt();
+
+    const { error: insertError } = await supabase.from("payments").insert({
+      receipt_no: rcpt, school_id: activeSchoolId, student_id: showPay.id, student_name: showPay.name,
+      term: currentTerm, amount, method: payMethod, received_by: receivedBy, payment_date: payDate,
+    });
+    if (insertError) {
+      return notify(`Could not record payment: ${insertError.message}`, "err");
+    }
+
     const newPay = { id: rcpt, date: payDate, amount, method: payMethod, receivedBy, term: currentTerm };
     const newBal = bal - amount;
     setAllStudents(prev => ({
@@ -1584,7 +1747,7 @@ export default function App() {
     setShowPay(null); setPayAmt(""); setPayMethod("Cash");
   };
 
-  const handleAddStudent = () => {
+  const handleAddStudent = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     if (!newS.name.trim() || !newS.parent.trim()) return notify("Fill required fields", "err");
 
@@ -1615,8 +1778,19 @@ export default function App() {
     }
 
     // ── Normal new enrolment ──
+    const { data: insertedRow, error: insertError } = await supabase.from("students").insert({
+      school_id: activeSchoolId,
+      name: newS.name, class: newS.class, stream: newS.stream || "", gender: newS.gender,
+      category: newS.category, parent_name: newS.parent, phone: newS.phone,
+      arrears: 0, custom_fee: newS.customFee ? parseInt(newS.customFee) : null,
+    }).select().single();
+
+    if (insertError) {
+      return notify(`Could not enroll student: ${insertError.message}`, "err");
+    }
+
     const s = {
-      id: `${activeSchoolId}-${Date.now()}`, schoolId: activeSchoolId,
+      id: insertedRow.id, schoolId: activeSchoolId,
       name: newS.name, class: newS.class, stream: newS.stream || "", gender: newS.gender,
       category: newS.category, parent: newS.parent, phone: newS.phone,
       arrears: 0, payments: [],
