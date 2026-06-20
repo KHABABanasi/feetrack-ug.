@@ -1,0 +1,13 @@
+# Dependencies — these get reinstalled automatically, never upload them
+node_modules
+
+# Real environment values — never upload your actual keys/secrets
+.env
+.env.local
+
+# Build output — Vercel generates this itself during deployment
+dist
+
+# Editor/OS clutter
+.DS_Store
+*.log
