@@ -2476,7 +2476,7 @@ export default function App() {
   };
 
   // ── Promotion Handler ─────────────────────────────────────────
-  const handlePromotion = () => {
+  const handlePromotion = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const sid = activeSchoolId;
     const current = allStudents[sid] || [];
@@ -2484,6 +2484,11 @@ export default function App() {
     const promoted = [];
     const lastClass = schoolClasses[schoolClasses.length - 1];
     const transitionClasses = getTransitionClasses(school);
+    // Each entry: { studentId, supabasePayload } — collected as we decide each
+    // student's outcome below, then sent to Supabase together in one batch
+    // right before updating local state, so the database and the screen
+    // never disagree about what happened.
+    const dbUpdates = [];
 
     current.forEach(s => {
       // Outstanding balance = this term's fee + any arrears already carried in,
@@ -2494,20 +2499,16 @@ export default function App() {
 
       // Did Not Return — applies to ANY class
       if (dnrDecisions[s.id]) {
-        newAlumni.push({
-          ...s,
-          status: "Did Not Return",
-          leftClass: s.class,
-          leftYear: promotionYear,
-          outstandingDebt: totalDebt,
-          leftNote: `Did not return for ${promotionYear}`,
-        });
+        const leftNote = `Did not return for ${promotionYear}`;
+        newAlumni.push({ ...s, status: "Did Not Return", leftClass: s.class, leftYear: promotionYear, outstandingDebt: totalDebt, leftNote });
+        dbUpdates.push({ id: s.id, status: "Did Not Return", left_class: s.class, left_year: promotionYear, outstanding_debt: totalDebt, left_note: leftNote });
         return;
       }
 
       // Repeating — stays in the same class, does not advance and is not treated as a transition/graduation case
       if (repeatDecisions[s.id]) {
         promoted.push({ ...s, class: s.class, stream: s.stream, arrears: totalDebt, payments: s.payments, isRepeating: true, repeatYear: promotionYear });
+        dbUpdates.push({ id: s.id, class: s.class, arrears: totalDebt });
         return;
       }
 
@@ -2515,22 +2516,39 @@ export default function App() {
 
       if (s.class === lastClass) {
         // Final graduation point — always leaves (repeat case already handled above)
-        newAlumni.push({ ...s, status: "Graduate", leftClass: s.class, leftYear: promotionYear, outstandingDebt: totalDebt, leftNote: `Completed ${s.class}` });
+        const leftNote = `Completed ${s.class}`;
+        newAlumni.push({ ...s, status: "Graduate", leftClass: s.class, leftYear: promotionYear, outstandingDebt: totalDebt, leftNote });
+        dbUpdates.push({ id: s.id, status: "Graduate", left_class: s.class, left_year: promotionYear, outstanding_debt: totalDebt, left_note: leftNote });
       } else if (transitionClasses.includes(s.class)) {
         // End-of-level class (P7, S4, Top Class, etc.) — explicit continue/leave decision
         const decision = transitionDecisions[s.id] || "leave";
         if (decision === "leave") {
-          newAlumni.push({ ...s, status: "Leaver", leftClass: s.class, leftYear: promotionYear, outstandingDebt: totalDebt, leftNote: `Left after ${s.class}` });
+          const leftNote = `Left after ${s.class}`;
+          newAlumni.push({ ...s, status: "Leaver", leftClass: s.class, leftYear: promotionYear, outstandingDebt: totalDebt, leftNote });
+          dbUpdates.push({ id: s.id, status: "Leaver", left_class: s.class, left_year: promotionYear, outstanding_debt: totalDebt, left_note: leftNote });
         } else {
           const nextClass = schoolClasses[clsIdx + 1] || s.class;
           promoted.push({ ...s, class: nextClass, stream: "", arrears: totalDebt, payments: s.payments });
+          dbUpdates.push({ id: s.id, class: nextClass, stream: "", arrears: totalDebt });
         }
       } else {
         // Normal promotion to next class in sequence
         const nextClass = schoolClasses[clsIdx + 1] || s.class;
         promoted.push({ ...s, class: nextClass, stream: "", arrears: totalDebt, payments: s.payments });
+        dbUpdates.push({ id: s.id, class: nextClass, stream: "", arrears: totalDebt });
       }
     });
+
+    // Send every student's update to Supabase as one batch before touching
+    // local state — if some fail, we report exactly how many and don't
+    // pretend the whole promotion succeeded.
+    const updateResults = await Promise.all(dbUpdates.map(({ id, ...payload }) =>
+      supabase.from("students").update(payload).eq("id", id)
+    ));
+    const failedCount = updateResults.filter(r => r.error).length;
+    if (failedCount > 0) {
+      notify(`${failedCount} of ${dbUpdates.length} students could not be updated — please check and retry for those`, "err");
+    }
 
     setAllStudents(prev => ({ ...prev, [sid]: promoted }));
     setAllAlumni(prev => ({ ...prev, [sid]: [...(prev[sid] || []), ...newAlumni] }));
