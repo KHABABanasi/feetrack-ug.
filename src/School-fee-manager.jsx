@@ -660,20 +660,13 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [parentPin, setParentPin] = useState("");
   // Alumni: { schoolId: [...leavers] }
-  const [allAlumni, setAllAlumni] = useState({
-    1: [
-      {
-        id: "1-alumni-demo", schoolId: 1, name: "Kirabo Daniel", class: "S3", gender: "M", category: "Day Scholar",
-        parent: "Kirabo Moses", phone: "0709-888-777", arrears: 0, bursary: null, customFee: null,
-        payments: [
-          { id: "RCP-0901", date: "2024-05-10", amount: 400000, method: "Cash", receivedBy: "Mugisha R.", term: "Term 2, 2024" },
-          { id: "RCP-0915", date: "2024-05-20", amount: 200000, method: "MTN MoMo", receivedBy: "Nakato B.", term: "Term 2, 2024" },
-        ],
-        status: "Did Not Return", leftClass: "S3", leftYear: "2025", outstandingDebt: 120000, leftNote: "Did not return for 2025",
-      },
-    ],
-    2: [], 3: [],
-  });
+  // Starts empty — populated from the real Supabase students table (rows with
+  // status != "active") by the loadStudentsForSchool function, not hardcoded
+  // demo data. Alumni share the same students table as active students (see
+  // the 04_alumni_status.sql migration) — split apart here by status, purely
+  // for the UI's convenience, since the Alumni and Students pages are
+  // separate screens that each expect their own list.
+  const [allAlumni, setAllAlumni] = useState({});
 
   // Settings
   const [adminCreds, setAdminCreds] = useState({ username: "admin", password: "admin123" });
@@ -1412,18 +1405,32 @@ export default function App() {
 
 
   // ── Manual Move to Alumni (mid-term transfer/dropout) ─────────
-  const handleMoveToAlumni = () => {
+  const handleMoveToAlumni = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     if (!showMoveAlumni) return;
     const s = showMoveAlumni;
     const debt = getBalance(s, currentTerm).balance;
+    const leftYear = currentTerm.split(", ")[1] || promotionYear;
+    const leftNote = moveAlumniReason || "Left mid-term";
+
+    const { error: updateError } = await supabase.from("students").update({
+      status: "Transferred",
+      left_class: s.class,
+      left_year: leftYear,
+      outstanding_debt: debt,
+      left_note: leftNote,
+    }).eq("id", s.id);
+    if (updateError) {
+      return notify(`Could not move student to Alumni: ${updateError.message}`, "err");
+    }
+
     const alumniRecord = {
       ...s,
       status: "Transferred",
       leftClass: s.class,
-      leftYear: currentTerm.split(", ")[1] || promotionYear,
+      leftYear,
       outstandingDebt: debt,
-      leftNote: moveAlumniReason || "Left mid-term",
+      leftNote,
     };
     setAllStudents(prev => ({
       ...prev,
@@ -1439,7 +1446,7 @@ export default function App() {
   };
 
   // ── Bulk Move to Alumni ──────────────────────────────────────────
-  const handleBulkMoveToAlumni = () => {
+  const handleBulkMoveToAlumni = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const ids = Object.keys(bulkAlumniSelected).filter(id => bulkAlumniSelected[id]);
     if (ids.length === 0) return notify("Select at least one student", "err");
@@ -1447,6 +1454,23 @@ export default function App() {
     const current = allStudents[sid] || [];
     const toMove = current.filter(s => ids.includes(String(s.id)));
     const staying = current.filter(s => !ids.includes(String(s.id)));
+    const leftYear = currentTerm.split(", ")[1] || promotionYear;
+    const leftNote = bulkAlumniReason || "Left mid-term";
+
+    const updateResults = await Promise.all(toMove.map(s => {
+      const debt = getBalance(s, currentTerm).balance;
+      return supabase.from("students").update({
+        status: "Transferred",
+        left_class: s.class,
+        left_year: leftYear,
+        outstanding_debt: debt,
+        left_note: leftNote,
+      }).eq("id", s.id);
+    }));
+    const failedCount = updateResults.filter(r => r.error).length;
+    if (failedCount > 0) {
+      notify(`${failedCount} of ${toMove.length} students could not be moved — please try again for those`, "err");
+    }
 
     const alumniRecords = toMove.map(s => {
       const debt = getBalance(s, currentTerm).balance;
@@ -1454,9 +1478,9 @@ export default function App() {
         ...s,
         status: "Transferred",
         leftClass: s.class,
-        leftYear: currentTerm.split(", ")[1] || promotionYear,
+        leftYear,
         outstandingDebt: debt,
-        leftNote: bulkAlumniReason || "Left mid-term",
+        leftNote,
       };
     });
 
@@ -1709,17 +1733,34 @@ export default function App() {
         if (n >= rcptN) rcptN = n + 1;
       }
     });
-    const loadedStudents = (studentsResult.data || []).map(row => ({
-      id: row.id, schoolId: row.school_id,
-      name: row.name, class: row.class, stream: row.stream || "", gender: row.gender,
-      category: row.category || "Day Scholar", parent: row.parent_name || "", phone: row.phone || "",
-      arrears: row.arrears || 0,
-      bursary: row.bursary_type ? { type: row.bursary_type, value: row.bursary_value, reason: row.bursary_reason || "" } : null,
-      customFee: row.custom_fee,
-      photo: row.photo_url || null,
-      payments: paymentsByStudent[row.id] || [],
-    }));
+    const loadedStudents = [];
+    const loadedAlumni = [];
+    (studentsResult.data || []).forEach(row => {
+      const base = {
+        id: row.id, schoolId: row.school_id,
+        name: row.name, class: row.class, stream: row.stream || "", gender: row.gender,
+        category: row.category || "Day Scholar", parent: row.parent_name || "", phone: row.phone || "",
+        arrears: row.arrears || 0,
+        bursary: row.bursary_type ? { type: row.bursary_type, value: row.bursary_value, reason: row.bursary_reason || "" } : null,
+        customFee: row.custom_fee,
+        photo: row.photo_url || null,
+        payments: paymentsByStudent[row.id] || [],
+      };
+      if (!row.status || row.status === "active") {
+        loadedStudents.push(base);
+      } else {
+        loadedAlumni.push({
+          ...base,
+          status: row.status,
+          leftClass: row.left_class || "",
+          leftYear: row.left_year || "",
+          outstandingDebt: row.outstanding_debt || 0,
+          leftNote: row.left_note || "",
+        });
+      }
+    });
     setAllStudents(prev => ({ ...prev, [schoolId]: loadedStudents }));
+    setAllAlumni(prev => ({ ...prev, [schoolId]: loadedAlumni }));
     setStudentsLoading(false);
   };
 
@@ -1813,9 +1854,22 @@ export default function App() {
 
     // ── Returning student: confirmed match with an alumni record ──
     if (confirmReturning && returningMatch) {
+      const { error: updateError } = await supabase.from("students").update({
+        status: "active",
+        name: newS.name, class: newS.class, stream: newS.stream || "", gender: newS.gender,
+        category: newS.category, parent_name: newS.parent, phone: newS.phone,
+        arrears: returningMatch.outstandingDebt || 0, // old debt carries forward as arrears
+        custom_fee: newS.customFee ? parseInt(newS.customFee) : (returningMatch.customFee || null),
+        left_class: null, left_year: null, outstanding_debt: null, left_note: null,
+      }).eq("id", returningMatch.id);
+
+      if (updateError) {
+        return notify(`Could not re-enrol returning student: ${updateError.message}`, "err");
+      }
+
       const s = {
         ...returningMatch,
-        id: `${activeSchoolId}-${Date.now()}`, schoolId: activeSchoolId,
+        schoolId: activeSchoolId,
         name: newS.name, class: newS.class, stream: newS.stream || "", gender: newS.gender,
         category: newS.category, parent: newS.parent, phone: newS.phone,
         arrears: returningMatch.outstandingDebt || 0, // old debt carries forward as arrears
