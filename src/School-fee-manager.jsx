@@ -256,6 +256,27 @@ const fmtDate = (d) => new Date(d).toLocaleDateString("en-UG", { day: "2-digit",
 const fmtDateTime = (d) => new Date(d).toLocaleString("en-UG", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 // Compute live subscription status: Active / Grace Period / Suspended
+// ── Session persistence ──────────────────────────────────────────
+// Saves just enough to know who was logged in, in the browser's own
+// localStorage — survives a page refresh, but NOT real authentication on
+// its own (no password is re-checked on restore). On restore, the app
+// re-fetches fresh real data from Supabase for whichever school/role was
+// saved, rather than trusting any cached data — only the *fact* of being
+// logged in is remembered, not stale information.
+const SESSION_KEY = "feetrack_session";
+const saveSession = (session) => {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch { /* storage unavailable — fail silently, just won't persist */ }
+};
+const loadSession = () => {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+};
+const clearSession = () => {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+};
+
 const getSubscriptionInfo = (school) => {
   if (!school || !school.nextBillingDate) return { status: "Active", daysOverdue: 0 };
   const due = new Date(school.nextBillingDate);
@@ -301,7 +322,7 @@ const buildSMS = (student, payment, school, balance) =>
 // ════════════════════════════════════════════════════════════════
 export default function App() {
   // ── State ──────────────────────────────────────────────────────
-  const [activeSchoolId, setActiveSchoolId] = useState(1);
+  const [activeSchoolId, setActiveSchoolId] = useState(null);
   const school = SCHOOLS_DATA[activeSchoolId];
   const schoolClasses = getSchoolClasses(school); // class list for this school's type (Nursery/Primary/Secondary/etc.)
   const [currentUser, setCurrentUser] = useState(null); // null=admin, else {studentId}
@@ -488,6 +509,31 @@ export default function App() {
       SCHOOLS_DATA = loaded;
       setSchoolsLoading(false);
       setSubscriptionRefresh(r => r + 1);
+
+      // ── Restore a saved login session, if there is one ────────────
+      // Only restores if the saved school/role still genuinely exists in
+      // the real data we just loaded — e.g. if a school was somehow
+      // removed since the session was saved, this safely does nothing
+      // rather than restoring into a broken state.
+      const session = loadSession();
+      if (session) {
+        if (session.role === "superadmin") {
+          setIsSuperAdmin(true);
+          setCurrentUser({ role: "superadmin" });
+        } else if (session.role === "admin" && loaded[session.schoolId]) {
+          setActiveSchoolId(session.schoolId);
+          setCurrentUser({ role: "admin" });
+          loadStudentsForSchool(session.schoolId);
+        } else if (session.role === "parent" && loaded[session.schoolId]) {
+          setActiveSchoolId(session.schoolId);
+          setCurrentUser(session);
+          loadStudentsForSchool(session.schoolId);
+        } else {
+          // Saved session no longer matches anything real — clear it
+          // rather than leaving a stale, unusable session sitting around.
+          clearSession();
+        }
+      }
     }
     loadSchools();
     return () => { cancelled = true; };
@@ -1683,6 +1729,7 @@ export default function App() {
       if (loginInput.user === superAdminCreds.username && loginInput.pass === superAdminCreds.password) {
         setIsSuperAdmin(true);
         setCurrentUser({ role: "superadmin" }); setLoginError("");
+        saveSession({ role: "superadmin" });
         return;
       }
       // Check approved schools' own credentials
@@ -1701,6 +1748,7 @@ export default function App() {
         }
         setActiveSchoolId(matchedSchool.id);
         setCurrentUser({ role: "admin" }); setLoginError("");
+        saveSession({ role: "admin", schoolId: matchedSchool.id });
         loadStudentsForSchool(matchedSchool.id);
         return;
       }
@@ -1711,10 +1759,22 @@ export default function App() {
       const myChildren = students.filter(s => s.phone.replace(/-/g, "") === loginInput.user.replace(/-/g, ""));
       const firstMatch = myChildren[0];
       if (firstMatch && loginInput.pass === firstMatch.phone.slice(-4)) {
-        setCurrentUser({ role: "parent", studentId: firstMatch.id, childIds: myChildren.map(c => c.id) });
+        const session = { role: "parent", schoolId: activeSchoolId, studentId: firstMatch.id, childIds: myChildren.map(c => c.id) };
+        setCurrentUser(session);
         setLoginError("");
+        saveSession(session);
       } else setLoginError("Phone not found or wrong PIN. PIN = last 4 digits of phone.");
     }
+  };
+
+  // ── Shared logout — clears both in-memory state and the saved session ──
+  const logout = () => {
+    setCurrentUser(null);
+    setIsSuperAdmin(false);
+    setActiveSchoolId(null);
+    setTab("dashboard");
+    setLoginInput({ user: "", pass: "" });
+    clearSession();
   };
 
   const handlePay = async () => {
@@ -2731,7 +2791,7 @@ export default function App() {
                 </span>
               </button>
             )}
-            <button onClick={() => { setCurrentUser(null); setIsSuperAdmin(false); setLoginInput({ user: "", pass: "" }); }} style={{ background: "#1e293b", color: "#94a3b8", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Logout</button>
+            <button onClick={logout} style={{ background: "#1e293b", color: "#94a3b8", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Logout</button>
           </div>
         </div>
 
@@ -3258,7 +3318,7 @@ export default function App() {
               <div style={{ color: "#64748b", fontSize: 11 }}>Parent Portal · {currentTerm}</div>
             </div>
           </div>
-          <button onClick={() => { setCurrentUser(null); setLoginInput({ user: "", pass: "" }); }} style={{ background: "#1e293b", color: "#94a3b8", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Logout</button>
+          <button onClick={logout} style={{ background: "#1e293b", color: "#94a3b8", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Logout</button>
         </div>
 
         <div style={{ maxWidth: 700, margin: "32px auto", padding: "0 20px" }}>
@@ -3464,7 +3524,7 @@ export default function App() {
         <div style={{ padding: "12px 18px", borderTop: "1px solid #1e293b" }}>
           <div style={{ color: "#475569", fontSize: 10, marginBottom: 2 }}>Logged in as</div>
           <div style={{ color: "#94a3b8", fontWeight: 600, fontSize: 11, marginBottom: 8 }}>{adminCreds.username} · {school.name.split(" ")[0]}</div>
-          <button onClick={() => { setCurrentUser(null); setTab("dashboard"); setLoginInput({ user: "", pass: "" }); }} style={{ width: "100%", background: "#450a0a", color: "#f87171", border: "none", borderRadius: 7, padding: "7px 0", fontSize: 11, cursor: "pointer", fontWeight: 700 }}>🚪 Logout</button>
+          <button onClick={logout} style={{ width: "100%", background: "#450a0a", color: "#f87171", border: "none", borderRadius: 7, padding: "7px 0", fontSize: 11, cursor: "pointer", fontWeight: 700 }}>🚪 Logout</button>
         </div>
       </aside>
 
@@ -4879,12 +4939,12 @@ export default function App() {
                   </div>
                 </div>
 
-                <button onClick={() => { setCurrentUser(null); setTab("dashboard"); setLoginInput({ user: "", pass: "" }); }}
+                <button onClick={logout}
                   style={{ width: "100%", padding: 12, borderRadius: 9, border: "none", background: "#ef4444", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer", marginBottom: 10 }}>
                   🚪 Log Out Now
                 </button>
 
-                <button onClick={() => { setCurrentUser(null); setTab("dashboard"); setLoginInput({ user: "", pass: "" }); }}
+                <button onClick={logout}
                   style={{ width: "100%", padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", color: "#374151", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
                   🔒 Lock Screen
                 </button>
