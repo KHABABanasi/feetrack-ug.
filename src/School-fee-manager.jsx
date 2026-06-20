@@ -650,87 +650,17 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
-  // ── Load real students for the logged-in school ─────────────────
-  // Unlike schools/pending-signups (loaded once at startup), this depends
-  // on activeSchoolId, since we don't know which school's students to load
-  // until someone actually logs in. The `typeof activeSchoolId === "number"`
-  // check skips the very first render, where activeSchoolId still holds its
-  // placeholder default (1) from before any real school is selected — real
-  // school ids are uuid strings, never plain numbers, so this distinguishes
-  // "nobody's logged in yet" from "a real school is now active."
-  useEffect(() => {
-    if (typeof activeSchoolId === "number") return;
-    let cancelled = false;
-    async function loadStudents() {
-      const { data, error } = await supabase.from("students").select("*").eq("school_id", activeSchoolId);
-      if (cancelled) return;
-      if (error) {
-        console.error("Failed to load students:", error.message);
-        return;
-      }
-      const loaded = (data || []).map(row => ({
-        id: row.id,
-        schoolId: row.school_id,
-        name: row.name,
-        class: row.class,
-        stream: row.stream || "",
-        gender: row.gender,
-        category: row.category || "Day Scholar",
-        parent: row.parent_name,
-        phone: row.phone,
-        arrears: row.arrears || 0,
-        bursary: row.bursary_type ? { type: row.bursary_type, value: row.bursary_value, reason: row.bursary_reason } : null,
-        customFee: row.custom_fee,
-        photo: row.photo_url || null,
-        payments: [], // filled in by the loadPayments effect below, once it resolves
-      }));
-      setAllStudents(prev => ({ ...prev, [activeSchoolId]: loaded }));
-    }
-    loadStudents();
-    return () => { cancelled = true; };
-  }, [activeSchoolId]);
-
-  // ── Load real payments for the logged-in school, attach to students ──
-  // Payments live in their own Supabase table (not embedded in each student
-  // row), so they're fetched separately and then matched onto the right
-  // student by student_id — mirroring the shape the rest of the app already
-  // expects (each student object having its own `payments` array).
-  useEffect(() => {
-    if (typeof activeSchoolId === "number") return;
-    let cancelled = false;
-    async function loadPayments() {
-      const { data, error } = await supabase.from("payments").select("*").eq("school_id", activeSchoolId);
-      if (cancelled) return;
-      if (error) {
-        console.error("Failed to load payments:", error.message);
-        return;
-      }
-      const byStudent = {};
-      (data || []).forEach(row => {
-        if (!row.student_id) return; // recovery payments for alumni aren't attached to a current student
-        if (!byStudent[row.student_id]) byStudent[row.student_id] = [];
-        byStudent[row.student_id].push({
-          id: row.receipt_no,
-          date: row.payment_date,
-          amount: row.amount,
-          method: row.method,
-          receivedBy: row.received_by,
-          term: row.term,
-          _dbId: row.id, // the real Supabase row id, needed later for edit/delete
-        });
-      });
-      setAllStudents(prev => {
-        const current = prev[activeSchoolId] || [];
-        if (current.length === 0) return prev; // students haven't loaded yet — nothing to attach payments to
-        return {
-          ...prev,
-          [activeSchoolId]: current.map(s => ({ ...s, payments: byStudent[s.id] || [] })),
-        };
-      });
-    }
-    loadPayments();
-    return () => { cancelled = true; };
-  }, [activeSchoolId, allStudents[activeSchoolId]?.length]);
+  // Note: students and payments for the logged-in school are loaded by
+  // loadStudentsForSchool (called from handleLogin and from the session-
+  // restoration effect above), not by a separate effect watching
+  // activeSchoolId here. An earlier version of this had two such effects;
+  // they were removed because they duplicated loadStudentsForSchool and,
+  // once activeSchoolId's default changed from the placeholder number 1 to
+  // null (as part of fixing login-session persistence), began firing a
+  // real Supabase query with school_id=null on every page load before
+  // login — harmless (Supabase correctly rejected it) but noisy and
+  // pointless, since the real loading path was already handling this
+  // correctly elsewhere.
 
   const [superAdminTab, setSuperAdminTab] = useState("signups");
   const [expandedId, setExpandedId] = useState(null);
@@ -1886,7 +1816,7 @@ export default function App() {
     setStudentsLoading(false);
   };
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (loginScreen === "admin") {
       // Super admin login
       if (loginInput.user === superAdminCreds.username && loginInput.pass === superAdminCreds.password) {
@@ -1918,15 +1848,37 @@ export default function App() {
       // Default demo credentials
       setLoginError(`Invalid credentials. If your school just signed up, wait for approval.`);
     } else {
-      // parent login: phone number as username, last 4 digits as pin
-      const myChildren = students.filter(s => s.phone.replace(/-/g, "") === loginInput.user.replace(/-/g, ""));
-      const firstMatch = myChildren[0];
-      if (firstMatch && loginInput.pass === firstMatch.phone.slice(-4)) {
-        const session = { role: "parent", schoolId: activeSchoolId, studentId: firstMatch.id, childIds: myChildren.map(c => c.id) };
+      // ── Parent login: phone number as username, last 4 digits as PIN ──
+      // A parent logging in fresh has no school selected yet — unlike an
+      // admin, who picks their school implicitly via their own username/
+      // password. So rather than searching only the currently-loaded
+      // school's students (which would be empty for a parent who hasn't
+      // selected anything), this searches the real students table directly
+      // by phone number, across all schools — a phone number naturally
+      // identifies one family, which in practice means one school.
+      const cleanPhone = loginInput.user.replace(/-/g, "");
+      const { data: matches, error } = await supabase.from("students").select("*").eq("status", "active");
+      if (error) {
+        setLoginError("Could not check phone number — please try again.");
+        return;
+      }
+      const myChildrenRows = (matches || []).filter(row => (row.phone || "").replace(/-/g, "") === cleanPhone);
+      const firstRow = myChildrenRows[0];
+      if (firstRow && loginInput.pass === (firstRow.phone || "").slice(-4)) {
+        const schoolId = firstRow.school_id;
+        // Load this school's real data so the parent's dashboard (which
+        // reads from the same allStudents/allAlumni state as admins) has
+        // something to show, exactly like an admin login already does.
+        await loadStudentsForSchool(schoolId);
+        const childIds = myChildrenRows.filter(r => r.school_id === schoolId).map(r => r.id);
+        const session = { role: "parent", schoolId, studentId: firstRow.id, childIds };
+        setActiveSchoolId(schoolId);
         setCurrentUser(session);
         setLoginError("");
         saveSession(session);
-      } else setLoginError("Phone not found or wrong PIN. PIN = last 4 digits of phone.");
+      } else {
+        setLoginError("Phone not found or wrong PIN. PIN = last 4 digits of phone.");
+      }
     }
   };
 
