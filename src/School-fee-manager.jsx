@@ -1316,37 +1316,81 @@ export default function App() {
     stopCamera();
   };
 
-  const savePhoto = (recordId, dataUrl) => {
+  // Uploads a student's photo to Supabase Storage and saves the resulting
+  // public URL on their row — rather than saving the raw base64 image data
+  // directly on the row, which would make every single students-list load
+  // (which happens on login, after every enrollment, etc.) drag along every
+  // student's full photo data even when no photo is being shown yet.
+  //
+  // Staff photos are NOT included in this — there's no real Supabase table
+  // for staff yet (that's still a separate, not-yet-migrated piece), so
+  // staff photos deliberately keep the old in-memory-only behavior for now
+  // and will still reset on refresh until staff itself gets migrated.
+  const savePhoto = async (recordId, dataUrl) => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
+
     if (photoUploadType === "staff") {
       setAllStaff(prev => ({
         ...prev,
         [activeSchoolId]: prev[activeSchoolId].map(s => s.id === recordId ? { ...s, photo: dataUrl } : s)
       }));
-    } else {
-      setAllStudents(prev => ({
-        ...prev,
-        [activeSchoolId]: prev[activeSchoolId].map(s => s.id === recordId ? { ...s, photo: dataUrl } : s)
-      }));
+      setShowPhotoUpload(null);
+      setCameraActive(false);
+      notify("Photo saved successfully ✓");
+      return;
     }
+
+    // Convert the base64 data URL (from file upload or camera capture) into
+    // a real binary Blob, which Supabase Storage's upload API expects.
+    const blob = await (await fetch(dataUrl)).blob();
+    const ext = blob.type === "image/png" ? "png" : "jpg";
+    const path = `students-${recordId}-${Date.now()}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage.from("photos").upload(path, blob, {
+      contentType: blob.type, upsert: true,
+    });
+    if (uploadError) {
+      return notify(`Could not upload photo: ${uploadError.message}`, "err");
+    }
+    const { data: urlData } = supabase.storage.from("photos").getPublicUrl(path);
+    const publicUrl = urlData.publicUrl;
+
+    const { error: updateError } = await supabase.from("students").update({ photo_url: publicUrl }).eq("id", recordId);
+    if (updateError) {
+      return notify(`Photo uploaded but could not be linked to the record: ${updateError.message}`, "err");
+    }
+
+    setAllStudents(prev => ({
+      ...prev,
+      [activeSchoolId]: prev[activeSchoolId].map(s => s.id === recordId ? { ...s, photo: publicUrl } : s)
+    }));
     setShowPhotoUpload(null);
     setCameraActive(false);
     notify("Photo saved successfully ✓");
   };
 
-  const removePhoto = (recordId) => {
+  const removePhoto = async (recordId) => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
+
     if (photoUploadType === "staff") {
       setAllStaff(prev => ({
         ...prev,
         [activeSchoolId]: prev[activeSchoolId].map(s => s.id === recordId ? { ...s, photo: null } : s)
       }));
-    } else {
-      setAllStudents(prev => ({
-        ...prev,
-        [activeSchoolId]: prev[activeSchoolId].map(s => s.id === recordId ? { ...s, photo: null } : s)
-      }));
+      setShowPhotoUpload(null);
+      setCameraActive(false);
+      notify("Photo removed");
+      return;
     }
+
+    const { error: updateError } = await supabase.from("students").update({ photo_url: null }).eq("id", recordId);
+    if (updateError) {
+      return notify(`Could not remove photo: ${updateError.message}`, "err");
+    }
+    setAllStudents(prev => ({
+      ...prev,
+      [activeSchoolId]: prev[activeSchoolId].map(s => s.id === recordId ? { ...s, photo: null } : s)
+    }));
     setShowPhotoUpload(null);
     notify("Photo removed");
   };
