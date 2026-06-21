@@ -358,7 +358,13 @@ export default function App() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  const [loginScreen, setLoginScreen] = useState("admin"); // "admin"|"parent"|"school-select"
+  const [loginScreen, setLoginScreen] = useState("admin"); // "admin"|"parent"|"school-select"|"signup"|"forgot-password"
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
+  const [forgotPasswordStatus, setForgotPasswordStatus] = useState(null); // null | "sending" | "sent" | error message string
+  const [resetPasswordToken, setResetPasswordToken] = useState(null); // set if the URL contains ?reset_token=...
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+  const [resetStatus, setResetStatus] = useState(null); // null | "submitting" | "success" | error message string
   const [loginInput, setLoginInput] = useState({ user: "", pass: "" });
   const [loginError, setLoginError] = useState("");
   const [schoolsLoading, setSchoolsLoading] = useState(true);
@@ -481,7 +487,7 @@ export default function App() {
   // Starts empty — populated from the real Supabase pending_signups table by
   // the loadPendingSignups effect below, not hardcoded fake demo entries.
   const [pendingSchools, setPendingSchools] = useState([]);
-  const [signupForm, setSignupForm] = useState({ schoolName: "", location: "", principal: "", phone: "", email: "", students: "", schoolType: "secondary", billingCycle: "monthly", username: "", password: "" });
+  const [signupForm, setSignupForm] = useState({ schoolName: "", location: "", principal: "", phone: "", email: "", students: "", schoolType: "secondary", billingCycle: "monthly", username: "", password: "", confirmPassword: "" });
   const [signupSubmitted, setSignupSubmitted] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [subscriptionRefresh, setSubscriptionRefresh] = useState(0); // bump to force re-render after SCHOOLS_DATA mutation
@@ -571,6 +577,17 @@ export default function App() {
     }
     loadSchools();
     return () => { cancelled = true; };
+  }, []);
+
+  // ── Detect a password-reset link being opened ───────────────────
+  // The email sent by request-password-reset links back here with
+  // ?reset_token=... in the URL. Checked once on load — if present, the
+  // reset-completion screen takes over regardless of login state, since
+  // the person clicking this link is, by definition, not logged in.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("reset_token");
+    if (token) setResetPasswordToken(token);
   }, []);
 
   // ── Auto-logout after a period of inactivity ────────────────────
@@ -846,11 +863,12 @@ export default function App() {
   const deleteReq = (id) => { if (isReadOnly) return notify("Account is in read-only mode.", "err"); setRequirements(prev => prev.filter(r => r.id !== id)); notify("Requirement removed"); };
 
   const handleSignupSubmit = async () => {
-    const { schoolName, location, principal, phone, email, students, schoolType, billingCycle, username, password } = signupForm;
+    const { schoolName, location, principal, phone, email, students, schoolType, billingCycle, username, password, confirmPassword } = signupForm;
     if (!schoolName.trim() || !principal.trim() || !phone.trim() || !username.trim() || !password.trim()) {
       return notify("Please fill all required fields", "err");
     }
     if (password.length < 6) return notify("Password must be at least 6 characters", "err");
+    if (password !== confirmPassword) return notify("Passwords do not match", "err");
 
     const { data, error } = await supabase.from("pending_signups").insert({
       school_name: schoolName, location, principal, phone, email,
@@ -1816,6 +1834,51 @@ export default function App() {
     setStudentsLoading(false);
   };
 
+  // ── Request a password reset email ───────────────────────────────
+  // Calls the request-password-reset Edge Function, which looks up the
+  // school by email, generates a token, and sends the reset link via
+  // Resend. Always shows the same success message regardless of whether
+  // the email actually matched a school — the Edge Function deliberately
+  // doesn't reveal that, to avoid letting this form be used to check
+  // which emails are registered.
+  const handleForgotPassword = async () => {
+    if (!forgotPasswordEmail.trim()) return;
+    setForgotPasswordStatus("sending");
+    try {
+      const { error } = await supabase.functions.invoke("request-password-reset", {
+        body: { email: forgotPasswordEmail.trim() },
+      });
+      if (error) {
+        setForgotPasswordStatus("Something went wrong. Please try again.");
+        return;
+      }
+      setForgotPasswordStatus("sent");
+    } catch {
+      setForgotPasswordStatus("Something went wrong. Please try again.");
+    }
+  };
+
+  // ── Complete a password reset using the token from the email link ──
+  const handleCompletePasswordReset = async () => {
+    if (resetNewPassword.length < 6) return setResetStatus("Password must be at least 6 characters");
+    if (resetNewPassword !== resetConfirmPassword) return setResetStatus("Passwords do not match");
+    setResetStatus("submitting");
+    try {
+      const { data, error } = await supabase.functions.invoke("complete-password-reset", {
+        body: { token: resetPasswordToken, newPassword: resetNewPassword },
+      });
+      if (error) {
+        // Edge Function errors (4xx/5xx) surface here without the response
+        // body by default — fall back to a generic message in that case.
+        setResetStatus(data?.error || "Could not reset password. The link may be invalid or expired.");
+        return;
+      }
+      setResetStatus("success");
+    } catch {
+      setResetStatus("Something went wrong. Please try again.");
+    }
+  };
+
   const handleLogin = async () => {
     if (loginScreen === "admin") {
       // Super admin login
@@ -2776,6 +2839,52 @@ export default function App() {
   const grid = (desktopCols, mobileCols = 1) => ({ display: "grid", gridTemplateColumns: isMobile ? `repeat(${mobileCols}, 1fr)` : `repeat(${desktopCols}, 1fr)` });
 
   // ════════════════════════ LOGIN SCREEN ════════════════════════
+  if (resetPasswordToken) {
+    // Someone opened a password-reset email link — this takes priority
+    // over everything else (including a saved session), since the whole
+    // point of this screen is to let them in regardless of whether
+    // they're currently logged in anywhere.
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Plus Jakarta Sans',sans-serif", padding: 20 }}>
+        <div style={{ background: "#fff", borderRadius: 20, padding: isMobile ? 24 : 40, width: isMobile ? "100%" : 380, maxWidth: 380, boxShadow: "0 32px 80px rgba(0,0,0,0.3)", boxSizing: "border-box" }}>
+          <div style={{ textAlign: "center", marginBottom: 28 }}>
+            <div style={{ fontSize: 44, marginBottom: 8 }}>🏫</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a" }}>FeeTrack UG</div>
+            <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Reset Your Password</div>
+          </div>
+          {resetStatus === "success" ? (
+            <div style={{ textAlign: "center", padding: "10px 0" }}>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>Password Updated</div>
+              <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.6, marginBottom: 20 }}>
+                You can now log in with your new password.
+              </div>
+              <button onClick={() => { setResetPasswordToken(null); window.history.replaceState({}, "", window.location.pathname); }} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
+                Go to Login
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={lbl}>New Password</label>
+                <input type="password" value={resetNewPassword} onChange={e => setResetNewPassword(e.target.value)} placeholder="min 6 characters" style={inp} />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={lbl}>Confirm New Password</label>
+                <input type="password" value={resetConfirmPassword} onChange={e => setResetConfirmPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && handleCompletePasswordReset()} placeholder="re-enter password" style={inp} />
+              </div>
+              {resetStatus && resetStatus !== "submitting" && (
+                <div style={{ background: "#fef2f2", color: "#b91c1c", padding: "10px 14px", borderRadius: 9, fontSize: 12, marginBottom: 16, fontWeight: 600 }}>{resetStatus}</div>
+              )}
+              <button onClick={handleCompletePasswordReset} disabled={resetStatus === "submitting"} style={{ width: "100%", padding: 13, borderRadius: 10, border: "none", background: "linear-gradient(135deg,#f59e0b,#ef4444)", color: "#fff", fontSize: 15, fontWeight: 800, cursor: resetStatus === "submitting" ? "default" : "pointer", opacity: resetStatus === "submitting" ? 0.7 : 1 }}>
+                {resetStatus === "submitting" ? "Updating..." : "Update Password"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
   if (!currentUser && hasSavedSession && schoolsLoading) {
     // We know there's a saved session waiting to be checked, but the real
     // schools data hasn't loaded yet — show a brief, neutral loading state
@@ -2816,7 +2925,7 @@ export default function App() {
                   Thank you for registering <strong>{signupForm.schoolName}</strong>. Our team will review your application within 24 hours.
                   You'll be notified via SMS/email once approved, and can then log in with the username and password you created.
                 </div>
-                <button onClick={() => { setLoginScreen("admin"); setSignupForm({ schoolName: "", location: "", principal: "", phone: "", email: "", students: "", schoolType: "secondary", username: "", password: "" }); setSignupSubmitted(false); }}
+                <button onClick={() => { setLoginScreen("admin"); setSignupForm({ schoolName: "", location: "", principal: "", phone: "", email: "", students: "", schoolType: "secondary", username: "", password: "", confirmPassword: "" }); setSignupSubmitted(false); }}
                   style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
                   Back to Login
                 </button>
@@ -2878,6 +2987,13 @@ export default function App() {
                       <label style={lbl}>Password *</label>
                       <input type="password" value={signupForm.password} onChange={e => setSignupForm(p => ({ ...p, password: e.target.value }))} placeholder="min 6 characters" style={inp} />
                     </div>
+                    <div>
+                      <label style={lbl}>Confirm Password *</label>
+                      <input type="password" value={signupForm.confirmPassword} onChange={e => setSignupForm(p => ({ ...p, confirmPassword: e.target.value }))} placeholder="re-enter password" style={inp} />
+                      {signupForm.confirmPassword && signupForm.password !== signupForm.confirmPassword && (
+                        <div style={{ fontSize: 11, color: "#dc2626", marginTop: 4, fontWeight: 600 }}>Passwords do not match</div>
+                      )}
+                    </div>
                   </div>
                 </div>
                 {loginError && <div style={{ background: "#fef2f2", color: "#b91c1c", padding: "10px 14px", borderRadius: 9, fontSize: 12, marginBottom: 14, fontWeight: 600 }}>{loginError}</div>}
@@ -2892,7 +3008,7 @@ export default function App() {
           )}
 
           {/* ── ADMIN / PARENT LOGIN ── */}
-          {loginScreen !== "signup" && (
+          {loginScreen !== "signup" && loginScreen !== "forgot-password" && (
             <>
               <div style={{ marginBottom: 14 }}>
                 <label style={lbl}>{loginScreen === "admin" ? "Username" : "Phone Number"}</label>
@@ -2906,6 +3022,13 @@ export default function App() {
               <button onClick={handleLogin} style={{ width: "100%", padding: 13, borderRadius: 10, border: "none", background: "linear-gradient(135deg,#f59e0b,#ef4444)", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>
                 {loginScreen === "admin" ? "Login to Dashboard" : "View My Child's Account"}
               </button>
+              {loginScreen === "admin" && (
+                <div style={{ marginTop: 10, textAlign: "center" }}>
+                  <button onClick={() => { setLoginScreen("forgot-password"); setForgotPasswordEmail(""); setForgotPasswordStatus(null); }} style={{ background: "none", border: "none", color: "#64748b", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                    Forgot password?
+                  </button>
+                </div>
+              )}
               <div style={{ marginTop: 16, textAlign: "center", fontSize: 11, color: "#94a3b8" }}>
                 {loginScreen === "admin" ? "Demo school login: admin / admin123" : "Enter your phone number & last 4 digits as PIN"}
               </div>
@@ -2917,6 +3040,43 @@ export default function App() {
                 </div>
               )}
             </>
+          )}
+
+          {/* ── FORGOT PASSWORD ── */}
+          {loginScreen === "forgot-password" && (
+            forgotPasswordStatus === "sent" ? (
+              <div style={{ textAlign: "center", padding: "20px 0" }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>📧</div>
+                <div style={{ fontSize: 17, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>Check your email</div>
+                <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.6, marginBottom: 20 }}>
+                  If that email is registered with a school, a reset link has been sent. It expires in 1 hour. Check your spam folder if you don't see it within a few minutes.
+                </div>
+                <button onClick={() => setLoginScreen("admin")} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
+                  Back to Login
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 13, color: "#64748b", marginBottom: 18, textAlign: "center" }}>
+                  Enter the email address registered to your school. We'll send a link to reset your password.
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={lbl}>School Email</label>
+                  <input value={forgotPasswordEmail} onChange={e => setForgotPasswordEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && handleForgotPassword()} placeholder="e.g. info@yourschool.ac.ug" style={inp} />
+                </div>
+                {forgotPasswordStatus && forgotPasswordStatus !== "sending" && (
+                  <div style={{ background: "#fef2f2", color: "#b91c1c", padding: "10px 14px", borderRadius: 9, fontSize: 12, marginBottom: 16, fontWeight: 600 }}>{forgotPasswordStatus}</div>
+                )}
+                <button onClick={handleForgotPassword} disabled={forgotPasswordStatus === "sending"} style={{ width: "100%", padding: 13, borderRadius: 10, border: "none", background: "linear-gradient(135deg,#f59e0b,#ef4444)", color: "#fff", fontSize: 15, fontWeight: 800, cursor: forgotPasswordStatus === "sending" ? "default" : "pointer", opacity: forgotPasswordStatus === "sending" ? 0.7 : 1 }}>
+                  {forgotPasswordStatus === "sending" ? "Sending..." : "Send Reset Link"}
+                </button>
+                <div style={{ marginTop: 10, textAlign: "center" }}>
+                  <button onClick={() => setLoginScreen("admin")} style={{ background: "none", border: "none", color: "#64748b", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                    ← Back to Login
+                  </button>
+                </div>
+              </div>
+            )
           )}
         </div>
       </div>
