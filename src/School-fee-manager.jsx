@@ -2859,9 +2859,12 @@ export default function App() {
               <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.6, marginBottom: 20 }}>
                 You can now log in with your new password.
               </div>
-              <button onClick={() => { setResetPasswordToken(null); window.history.replaceState({}, "", window.location.pathname); }} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
+              <button onClick={() => { window.location.href = window.location.pathname; }} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
                 Go to Login
               </button>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 10, textAlign: "center" }}>
+                (This will refresh the page so your new password takes effect)
+              </div>
             </div>
           ) : (
             <div>
