@@ -2067,10 +2067,18 @@ export default function App() {
   };
 
   // ── First-time setup wizard ─────────────────────────────────
-  const markSetupComplete = () => {
+  const markSetupComplete = async () => {
     SCHOOLS_DATA[activeSchoolId].setupComplete = true;
     setSetupDismissed(true);
     notify("✓ Setup complete! Welcome to FeeTrack UG");
+    const { error } = await supabase.from("schools").update({ setup_complete: true }).eq("id", activeSchoolId);
+    if (error) console.error("Failed to save setup-complete status:", error.message);
+    // Deliberately not blocking on this or showing an error toast for a
+    // failure here — the in-memory flag already dismissed the wizard for
+    // this session, which is the part that actually matters to the
+    // person right now. Worst case if this write fails: the wizard
+    // reappears once on their next reload, which is a minor inconvenience
+    // rather than something that should interrupt their flow.
   };
 
   // ── Class Streams Configuration ──────────────────────────────
@@ -2093,8 +2101,13 @@ export default function App() {
     setStreamsForm(updated);
   };
 
-  const saveStreams = () => {
+  const saveStreams = async () => {
     if (!streamsForm) return notify("No changes to save");
+    const { error } = await supabase.from("schools").update({ streams: streamsForm }).eq("id", activeSchoolId);
+    if (error) {
+      console.error("Failed to save class streams:", error.message);
+      return notify("Could not save changes — please try again", "err");
+    }
     SCHOOLS_DATA[activeSchoolId].streams = streamsForm;
     setSubscriptionRefresh(r => r + 1);
     setStreamsForm(null);
@@ -5204,13 +5217,29 @@ export default function App() {
                   </div>
                 ))}
 
-                <button onClick={() => {
-                  SCHOOLS_DATA[activeSchoolId].name = schoolProfile.name || SCHOOLS_DATA[activeSchoolId].name;
-                  SCHOOLS_DATA[activeSchoolId].location = schoolProfile.location || SCHOOLS_DATA[activeSchoolId].location;
-                  SCHOOLS_DATA[activeSchoolId].principal = schoolProfile.principal || SCHOOLS_DATA[activeSchoolId].principal;
-                  SCHOOLS_DATA[activeSchoolId].phone = schoolProfile.phone || SCHOOLS_DATA[activeSchoolId].phone;
+                <button onClick={async () => {
                   if (schoolProfile.notifyEmail && !schoolProfile.notifyEmail.includes("@")) return notify("Enter a valid email address", "err");
-                  SCHOOLS_DATA[activeSchoolId].notifyEmail = schoolProfile.notifyEmail || "";
+                  const updates = {
+                    name: schoolProfile.name || SCHOOLS_DATA[activeSchoolId].name,
+                    location: schoolProfile.location || SCHOOLS_DATA[activeSchoolId].location,
+                    principal: schoolProfile.principal || SCHOOLS_DATA[activeSchoolId].principal,
+                    phone: schoolProfile.phone || SCHOOLS_DATA[activeSchoolId].phone,
+                    notify_email: schoolProfile.notifyEmail || "",
+                  };
+                  const { error } = await supabase.from("schools").update(updates).eq("id", activeSchoolId);
+                  if (error) {
+                    console.error("Failed to save school profile:", error.message);
+                    return notify("Could not save changes — please try again", "err");
+                  }
+                  // Mirror the same change into the in-memory copy too, so the
+                  // rest of the app (which still reads from SCHOOLS_DATA in
+                  // several places) reflects the update immediately without
+                  // needing a full page reload.
+                  SCHOOLS_DATA[activeSchoolId].name = updates.name;
+                  SCHOOLS_DATA[activeSchoolId].location = updates.location;
+                  SCHOOLS_DATA[activeSchoolId].principal = updates.principal;
+                  SCHOOLS_DATA[activeSchoolId].phone = updates.phone;
+                  SCHOOLS_DATA[activeSchoolId].notifyEmail = updates.notify_email;
                   setSubscriptionRefresh(r => r + 1);
                   notify("School profile updated ✓");
                 }} style={{ width: "100%", padding: 11, borderRadius: 9, border: "none", background: "#10b981", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
