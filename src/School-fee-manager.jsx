@@ -906,6 +906,7 @@ export default function App() {
       location: school.location || "Uganda",
       principal: school.principal,
       phone: school.phone,
+      notify_email: school.email || "",
       logo: "🏫",
       school_type: school.schoolType || "secondary",
       setup_complete: false,
@@ -938,6 +939,7 @@ export default function App() {
     SCHOOLS_DATA[newSchoolId] = {
       id: newSchoolId, name: school.schoolName, location: school.location || "Uganda",
       principal: school.principal, phone: school.phone, logo: "🏫",
+      notifyEmail: school.email || "",
       adminUsername: school.username || "admin", adminPassword: school.password || "school123",
       setupComplete: false,
       schoolType: school.schoolType || "secondary",
@@ -2960,7 +2962,7 @@ export default function App() {
                   { label: "Location *", key: "location", placeholder: "e.g. Jinja" },
                   { label: "Principal / Headteacher *", key: "principal", placeholder: "e.g. Mrs. Akello Joan" },
                   { label: "School Phone *", key: "phone", placeholder: "e.g. 0772-555-101" },
-                  { label: "School Email (optional)", key: "email", placeholder: "e.g. info@yourschool.ac.ug" },
+                  { label: "School Email (for password reset)", key: "email", placeholder: "e.g. info@yourschool.ac.ug" },
                   { label: "Approx. Number of Students", key: "students", placeholder: "e.g. 350" },
                 ].map(f => (
                   <div key={f.key} style={{ marginBottom: 12 }}>
