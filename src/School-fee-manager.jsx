@@ -2103,15 +2103,13 @@ export default function App() {
 
   const saveStreams = async () => {
     if (!streamsForm) return notify("No changes to save");
-    console.log("DEBUG saveStreams — activeSchoolId:", activeSchoolId);
     const { data, error } = await supabase.from("schools").update({ streams: streamsForm }).eq("id", activeSchoolId).select();
-    console.log("DEBUG saveStreams — data:", data, "error:", error);
     if (error) {
       console.error("Failed to save class streams:", error.message);
       return notify("Could not save changes — please try again", "err");
     }
     if (!data || data.length === 0) {
-      console.error("DEBUG saveStreams — update matched zero rows for activeSchoolId:", activeSchoolId);
+      console.error("saveStreams — update matched zero rows for activeSchoolId:", activeSchoolId);
       return notify("Could not save changes — school not found", "err");
     }
     SCHOOLS_DATA[activeSchoolId].streams = streamsForm;
@@ -5232,15 +5230,13 @@ export default function App() {
                     phone: schoolProfile.phone || SCHOOLS_DATA[activeSchoolId].phone,
                     notify_email: schoolProfile.notifyEmail || "",
                   };
-                  console.log("DEBUG saveProfile — activeSchoolId:", activeSchoolId);
                   const { data, error } = await supabase.from("schools").update(updates).eq("id", activeSchoolId).select();
-                  console.log("DEBUG saveProfile — data:", data, "error:", error);
                   if (error) {
                     console.error("Failed to save school profile:", error.message);
                     return notify("Could not save changes — please try again", "err");
                   }
                   if (!data || data.length === 0) {
-                    console.error("DEBUG saveProfile — update matched zero rows for activeSchoolId:", activeSchoolId);
+                    console.error("saveProfile — update matched zero rows for activeSchoolId:", activeSchoolId);
                     return notify("Could not save changes — school not found", "err");
                   }
                   // Mirror the same change into the in-memory copy too, so the
