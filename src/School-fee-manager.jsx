@@ -1830,13 +1830,10 @@ export default function App() {
       supabase.rpc("get_payments_for_school", { p_school_id: schoolId }),
     ]);
     if (studentsResult.error) {
-      console.error("DEBUG loadStudents error:", studentsResult.error);
       notify(`Could not load students: ${studentsResult.error.message}`, "err");
       setStudentsLoading(false);
       return;
     }
-    console.log("DEBUG studentsResult.data:", studentsResult.data);
-    console.log("DEBUG paymentsResult.data:", paymentsResult.data);
     if (paymentsResult.error) {
       notify(`Could not load payment history: ${paymentsResult.error.message}`, "err");
     }
