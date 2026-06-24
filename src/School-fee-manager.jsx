@@ -1829,15 +1829,18 @@ export default function App() {
       supabase.rpc("get_payments_for_school", { p_school_id: schoolId }),
     ]);
     if (studentsResult.error) {
+      console.error("DEBUG loadStudents error:", studentsResult.error);
       notify(`Could not load students: ${studentsResult.error.message}`, "err");
       setStudentsLoading(false);
       return;
     }
+    console.log("DEBUG studentsResult.data:", studentsResult.data);
+    console.log("DEBUG paymentsResult.data:", paymentsResult.data);
     if (paymentsResult.error) {
       notify(`Could not load payment history: ${paymentsResult.error.message}`, "err");
     }
     const paymentsByStudent = {};
-    (paymentsResult.data || []).forEach(p => {
+    (paymentsResult.data || []).filter(Boolean).forEach(p => {
       if (!paymentsByStudent[p.student_id]) paymentsByStudent[p.student_id] = [];
       paymentsByStudent[p.student_id].push({
         id: p.receipt_no, dbId: p.id, date: p.payment_date, amount: p.amount,
@@ -1848,7 +1851,7 @@ export default function App() {
     // number already saved for this school, so it can't generate a number
     // that collides with one that already exists in the database — the
     // counter itself has no memory between page loads, only the database does.
-    (paymentsResult.data || []).forEach(p => {
+    (paymentsResult.data || []).filter(Boolean).forEach(p => {
       const match = /^RCP-(\d+)$/.exec(p.receipt_no || "");
       if (match) {
         const n = parseInt(match[1], 10);
@@ -1857,7 +1860,7 @@ export default function App() {
     });
     const loadedStudents = [];
     const loadedAlumni = [];
-    (studentsResult.data || []).forEach(row => {
+    (studentsResult.data || []).filter(Boolean).forEach(row => {
       const base = {
         id: row.id, schoolId: row.school_id,
         name: row.name, class: row.class, stream: row.stream || "", gender: row.gender,
