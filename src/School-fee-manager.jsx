@@ -1821,9 +1821,12 @@ export default function App() {
   // than the old hardcoded demo arrears.
   const loadStudentsForSchool = async (schoolId) => {
     setStudentsLoading(true);
+    // Use SECURITY DEFINER Postgres functions instead of direct table queries —
+    // this works for both authenticated school admins AND unauthenticated parents
+    // (who have no Supabase Auth session and would be blocked by RLS otherwise).
     const [studentsResult, paymentsResult] = await Promise.all([
-      supabase.from("students").select("*").eq("school_id", schoolId),
-      supabase.from("payments").select("*").eq("school_id", schoolId),
+      supabase.rpc("get_students_for_school", { p_school_id: schoolId }),
+      supabase.rpc("get_payments_for_school", { p_school_id: schoolId }),
     ]);
     if (studentsResult.error) {
       notify(`Could not load students: ${studentsResult.error.message}`, "err");
@@ -1956,42 +1959,67 @@ export default function App() {
         setLoginError("Invalid credentials. If your school just signed up, wait for approval.");
         return;
       }
-      // Step 3: find the matching school in SCHOOLS_DATA by user_id.
-      const matchedSchool = Object.values(SCHOOLS_DATA).find(s => s.userId === authData.user.id);
-      if (!matchedSchool) {
-        // Auth succeeded but no matching school found — likely user_id not yet
-        // linked. Fall back to username match for schools not yet fully migrated.
-        const fallback = Object.values(SCHOOLS_DATA).find(s => s.adminUsername === loginInput.user);
-        if (!fallback) {
-          setLoginError("School account not found. Please contact support.");
-          return;
-        }
-        if (fallback.isTrial && !fallback.trialActivated) {
-          const trialEnd = new Date();
-          trialEnd.setDate(trialEnd.getDate() + 30);
-          SCHOOLS_DATA[fallback.id] = { ...fallback, trialActivated: true, trialStartDate: new Date().toISOString().split("T")[0], nextBillingDate: trialEnd.toISOString().split("T")[0] };
-        }
-        setActiveSchoolId(fallback.id);
-        setCurrentUser({ role: "admin" }); setLoginError("");
-        saveSession({ role: "admin", schoolId: fallback.id });
-        loadStudentsForSchool(fallback.id);
+      // Step 3: fetch this school's row directly — now that we have a valid
+      // Supabase Auth session, RLS will return exactly this school's row.
+      // We can't rely on SCHOOLS_DATA here since it was empty on page load
+      // (no auth session existed yet when loadSchools ran).
+      const { data: schoolRows, error: schoolFetchError } = await supabase
+        .from("schools")
+        .select("*")
+        .eq("user_id", authData.user.id)
+        .single();
+      if (schoolFetchError || !schoolRows) {
+        setLoginError("School account not found. Please contact support.");
         return;
       }
-      // Start the 30-day free trial on first login (not at approval time)
-      if (matchedSchool.isTrial && !matchedSchool.trialActivated) {
+      const fetchedSchool = schoolRows;
+      const newSchoolId = fetchedSchool.id;
+      // Populate SCHOOLS_DATA with this school so the rest of the app works
+      SCHOOLS_DATA[newSchoolId] = {
+        id: newSchoolId,
+        userId: fetchedSchool.user_id || null,
+        name: fetchedSchool.name,
+        location: fetchedSchool.location,
+        principal: fetchedSchool.principal,
+        phone: fetchedSchool.phone,
+        notifyEmail: fetchedSchool.notify_email || "",
+        logo: fetchedSchool.logo || "🏫",
+        schoolType: fetchedSchool.school_type || "secondary",
+        streams: fetchedSchool.streams || {},
+        setupComplete: fetchedSchool.setup_complete,
+        adminUsername: fetchedSchool.admin_username,
+        adminPassword: fetchedSchool.admin_password,
+        plan: fetchedSchool.plan || "Starter",
+        billingCycle: fetchedSchool.billing_cycle || "monthly",
+        customPrice: fetchedSchool.custom_price,
+        customPriceNote: fetchedSchool.custom_price_note || "",
+        subscriptionStatus: fetchedSchool.subscription_status || "Active",
+        isTrial: fetchedSchool.is_trial,
+        trialActivated: fetchedSchool.trial_activated,
+        trialStartDate: fetchedSchool.trial_start_date,
+        nextBillingDate: fetchedSchool.next_billing_date,
+        lastPaymentDate: fetchedSchool.last_payment_date,
+        paymentNoticeFreeze: fetchedSchool.payment_notice_freeze || false,
+        billingRef: fetchedSchool.billing_ref,
+      };
+      // Start the 30-day free trial on first login
+      if (fetchedSchool.is_trial && !fetchedSchool.trial_activated) {
         const trialEnd = new Date();
         trialEnd.setDate(trialEnd.getDate() + 30);
-        SCHOOLS_DATA[matchedSchool.id] = {
-          ...matchedSchool,
-          trialActivated: true,
-          trialStartDate: new Date().toISOString().split("T")[0],
-          nextBillingDate: trialEnd.toISOString().split("T")[0],
-        };
+        SCHOOLS_DATA[newSchoolId].trialActivated = true;
+        SCHOOLS_DATA[newSchoolId].trialStartDate = new Date().toISOString().split("T")[0];
+        SCHOOLS_DATA[newSchoolId].nextBillingDate = trialEnd.toISOString().split("T")[0];
+        await supabase.from("schools").update({
+          trial_activated: true,
+          trial_start_date: new Date().toISOString().split("T")[0],
+          next_billing_date: trialEnd.toISOString().split("T")[0],
+        }).eq("id", newSchoolId);
       }
-      setActiveSchoolId(matchedSchool.id);
+      setActiveSchoolId(newSchoolId);
       setCurrentUser({ role: "admin" }); setLoginError("");
-      saveSession({ role: "admin", schoolId: matchedSchool.id });
-      loadStudentsForSchool(matchedSchool.id);
+      saveSession({ role: "admin", schoolId: newSchoolId });
+      loadStudentsForSchool(newSchoolId);
+      setSubscriptionRefresh(r => r + 1);
       return;
       // ── End Supabase Auth login ──────────────────────────────────
     } else {
