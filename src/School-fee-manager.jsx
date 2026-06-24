@@ -112,6 +112,7 @@ const DEFAULT_REQUIREMENTS = [
 
 // getStudentFee is redefined inside component to access state — see below
 const getStudentFeeStatic = (student, feeStructure, requirements) => {
+  if (!student) return 0; // safety guard — should never be undefined but prevents white screen
   // Requirements that apply to this student (mandatory only added to fee)
   const reqCost = requirements
     .filter(r => r.mandatory && r.appliesTo.includes(student.category || "Day Scholar"))
@@ -1861,15 +1862,17 @@ export default function App() {
     const loadedStudents = [];
     const loadedAlumni = [];
     (studentsResult.data || []).filter(Boolean).forEach(row => {
+      if (!row || !row.id) return; // skip any malformed rows entirely
       const base = {
-        id: row.id, schoolId: row.school_id,
-        name: row.name, class: row.class, stream: row.stream || "", gender: row.gender,
+        id: row.id, schoolId: row.school_id || "",
+        name: row.name || "", class: row.class || "", stream: row.stream || "", gender: row.gender || "",
         category: row.category || "Day Scholar", parent: row.parent_name || "", phone: row.phone || "",
         arrears: row.arrears || 0,
-        bursary: row.bursary_type ? { type: row.bursary_type, value: row.bursary_value, reason: row.bursary_reason || "" } : null,
-        customFee: row.custom_fee,
+        bursary: row.bursary_type ? { type: row.bursary_type, value: row.bursary_value || 0, reason: row.bursary_reason || "" } : null,
+        customFee: row.custom_fee || null,
         photo: row.photo_url || null,
         payments: paymentsByStudent[row.id] || [],
+        status: row.status || "active",
       };
       if (!row.status || row.status === "active") {
         loadedStudents.push(base);
