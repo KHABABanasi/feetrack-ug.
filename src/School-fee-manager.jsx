@@ -389,7 +389,9 @@ export default function App() {
   const [smsLog, setSmsLog] = useState([]);
 
   const [tab, setTab] = useState("dashboard");
-  const [currentTerm, setCurrentTerm] = useState("Term 2, 2025");
+  const [currentTerm, setCurrentTerm] = useState(() => {
+    try { return localStorage.getItem("feetrack_current_term") || "Term 2, 2025"; } catch { return "Term 2, 2025"; }
+  });
   const [search, setSearch] = useState("");
   const [paymentsTermFilter, setPaymentsTermFilter] = useState("current"); // "current" | "all" | specific term string
   const [filterClass, setFilterClass] = useState("All");
@@ -710,6 +712,11 @@ export default function App() {
   // login — harmless (Supabase correctly rejected it) but noisy and
   // pointless, since the real loading path was already handling this
   // correctly elsewhere.
+
+  // Persist currentTerm to localStorage so it survives page refreshes
+  useEffect(() => {
+    try { localStorage.setItem("feetrack_current_term", currentTerm); } catch {}
+  }, [currentTerm]);
 
   const [superAdminTab, setSuperAdminTab] = useState("signups");
   const [expandedId, setExpandedId] = useState(null);
