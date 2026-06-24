@@ -2004,7 +2004,7 @@ export default function App() {
       // by phone number, across all schools — a phone number naturally
       // identifies one family, which in practice means one school.
       const cleanPhone = loginInput.user.replace(/-/g, "");
-      const { data: matches, error } = await supabase.from("students").select("*").eq("status", "active");
+      const { data: matches, error } = await supabase.rpc("get_students_by_phone", { p_phone: cleanPhone });
       if (error) {
         setLoginError("Could not check phone number — please try again.");
         return;
