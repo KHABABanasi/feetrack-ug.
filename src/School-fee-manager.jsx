@@ -2154,7 +2154,7 @@ export default function App() {
       // remove status/leftClass/leftYear/outstandingDebt/leftNote fields from the alumni record
       delete s.status; delete s.leftClass; delete s.leftYear; delete s.outstandingDebt; delete s.leftNote;
 
-      setAllStudents(prev => ({ ...prev, [activeSchoolId]: [...prev[activeSchoolId], s] }));
+      setAllStudents(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), s] }));
       setAllAlumni(prev => ({ ...prev, [activeSchoolId]: prev[activeSchoolId].filter(a => a.id !== returningMatch.id) }));
       checkAutoUpgrade(activeSchoolId, students.length + 1);
       notify(`✓ ${newS.name} re-enrolled as returning student! Old records restored — arrears: ${fmt(s.arrears)}`);
@@ -2185,7 +2185,7 @@ export default function App() {
       bursary: null,
       customFee: newS.customFee ? parseInt(newS.customFee) : null,
     };
-    setAllStudents(prev => ({ ...prev, [activeSchoolId]: [...prev[activeSchoolId], s] }));
+    setAllStudents(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), s] }));
     checkAutoUpgrade(activeSchoolId, students.length + 1);
     notify(`${newS.name} enrolled — ${fmt(getStudentFee(s))}/term`);
     setShowAdd(false);
@@ -2667,7 +2667,7 @@ export default function App() {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     if (!newExp.description || !newExp.amount) return notify("Fill all fields", "err");
     const e = { id: `${activeSchoolId}-e${Date.now()}`, schoolId: activeSchoolId, ...newExp, amount: parseInt(newExp.amount), term: currentTerm, paidBy: "Admin" };
-    setAllExpenses(prev => ({ ...prev, [activeSchoolId]: [...prev[activeSchoolId], e] }));
+    setAllExpenses(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), e] }));
     notify("Expense recorded");
     setShowAddExp(false); setNewExp({ category: "Salaries", description: "", amount: "", date: new Date().toISOString().split("T")[0] });
   };
@@ -2722,7 +2722,7 @@ export default function App() {
   // Recording a staff payment creates BOTH a staff payment record (for the Staff tab's
   // history) AND a matching expense under "Salaries & Wages" (so Dashboard/Net Surplus
   // figures stay accurate without the bursar having to enter the same amount twice).
-  const handlePayStaff = () => {
+  const handlePayStaff = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     if (!showPayStaff) return;
     const amount = parseInt(String(payStaffForm.amount).replace(/,/g, ""));
@@ -2730,19 +2730,25 @@ export default function App() {
     if (!payStaffForm.periodLabel) return notify("Describe what period this payment covers (e.g. \"May 2026\" or \"12 Jun 2026\")", "err");
 
     const today = new Date().toISOString().split("T")[0];
-    const spId = `${activeSchoolId}-sp${Date.now()}`;
+    const { data: inserted, error } = await supabase.from("staff_payments").insert({
+      school_id: activeSchoolId, staff_id: showPayStaff.id, staff_name: showPayStaff.name,
+      amount, pay_type: payStaffForm.payType, period_label: payStaffForm.periodLabel,
+      payment_date: today, term: currentTerm, paid_by: "Admin",
+    }).select().single();
+    if (error) return notify(`Could not record payment: ${error.message}`, "err");
+
     const sp = {
-      id: spId, schoolId: activeSchoolId, staffId: showPayStaff.id, staffName: showPayStaff.name,
+      id: inserted.id, schoolId: activeSchoolId, staffId: showPayStaff.id, staffName: showPayStaff.name,
       amount, payType: payStaffForm.payType, periodLabel: payStaffForm.periodLabel,
       date: today, term: currentTerm, paidBy: "Admin",
     };
     const exp = {
       id: `${activeSchoolId}-e${Date.now()}`, schoolId: activeSchoolId, category: "Salaries & Wages",
       description: `${showPayStaff.name} (${showPayStaff.role}) — ${payStaffForm.periodLabel}`,
-      amount, date: today, term: currentTerm, paidBy: "Admin", staffPaymentId: spId,
+      amount, date: today, term: currentTerm, paidBy: "Admin", staffPaymentId: inserted.id,
     };
     setAllStaffPayments(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), sp] }));
-    setAllExpenses(prev => ({ ...prev, [activeSchoolId]: [...prev[activeSchoolId], exp] }));
+    setAllExpenses(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), exp] }));
     notify(`✓ ${fmt(amount)} paid to ${showPayStaff.name}`);
     setShowPayStaff(null);
     setPayStaffForm({ amount: "", payType: "daily", periodLabel: "" });
