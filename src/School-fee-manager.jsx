@@ -504,7 +504,37 @@ export default function App() {
     async function loadSchools() {
       setSchoolsLoading(true);
       setSchoolsLoadError("");
-      const { data, error } = await supabase.from("schools").select("*");
+
+      // Restore the Supabase Auth session from localStorage first.
+      // This is fast (local read) and ensures RLS policies see a valid
+      // auth.uid() for the subsequent schools query.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const hasAuthSession = !!sessionData?.session;
+
+      let data, error;
+
+      if (hasAuthSession) {
+        // Authenticated: RLS will filter to only this school's row automatically.
+        ({ data, error } = await supabase.from("schools").select("*"));
+      } else {
+        // No auth session yet — check if there's a saved custom session.
+        // If there is, we need to sign back into Supabase Auth first so RLS works.
+        const saved = loadSession();
+        if (saved && saved.role === "admin") {
+          // Can't restore auth session without credentials — clear the saved
+          // session and show the login screen. The user will log in fresh
+          // which will establish a new Supabase Auth session via signInWithPassword.
+          clearSession();
+          setSchoolsLoading(false);
+          return;
+        }
+        // Super admin or parent login doesn't need school rows pre-auth.
+        // Just load an empty set and proceed to login screen.
+        SCHOOLS_DATA = {};
+        setSchoolsLoading(false);
+        setSubscriptionRefresh(r => r + 1);
+        return;
+      }
       if (cancelled) return;
       if (error) {
         setSchoolsLoadError(error.message);
