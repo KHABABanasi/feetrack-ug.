@@ -515,6 +515,7 @@ export default function App() {
       (data || []).forEach(row => {
         loaded[row.id] = {
           id: row.id,
+          userId: row.user_id || null,
           name: row.name,
           location: row.location,
           principal: row.principal,
@@ -1890,28 +1891,63 @@ export default function App() {
         saveSession({ role: "superadmin" });
         return;
       }
-      // Check approved schools' own credentials
-      const matchedSchool = Object.values(SCHOOLS_DATA).find(s => s.adminUsername === loginInput.user && s.adminPassword === loginInput.pass);
-      if (matchedSchool) {
-        // Start the 30-day free trial on first login (not at approval time)
-        if (matchedSchool.isTrial && !matchedSchool.trialActivated) {
-          const trialEnd = new Date();
-          trialEnd.setDate(trialEnd.getDate() + 30);
-          SCHOOLS_DATA[matchedSchool.id] = {
-            ...matchedSchool,
-            trialActivated: true,
-            trialStartDate: new Date().toISOString().split("T")[0],
-            nextBillingDate: trialEnd.toISOString().split("T")[0],
-          };
-        }
-        setActiveSchoolId(matchedSchool.id);
-        setCurrentUser({ role: "admin" }); setLoginError("");
-        saveSession({ role: "admin", schoolId: matchedSchool.id });
-        loadStudentsForSchool(matchedSchool.id);
+      // ── Supabase Auth login ──────────────────────────────────────
+      // Step 1: look up the school's email from their username via
+      // a safe server-side Postgres function (username is typed by
+      // the user; the function returns only the matching email).
+      const { data: emailData, error: emailLookupError } = await supabase
+        .rpc("get_school_email_by_username", { p_username: loginInput.user });
+      if (emailLookupError || !emailData) {
+        setLoginError("Invalid credentials. If your school just signed up, wait for approval.");
         return;
       }
-      // Default demo credentials
-      setLoginError(`Invalid credentials. If your school just signed up, wait for approval.`);
+      // Step 2: sign in with Supabase Auth using the real email + password.
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: emailData,
+        password: loginInput.pass,
+      });
+      if (authError || !authData?.user) {
+        setLoginError("Invalid credentials. If your school just signed up, wait for approval.");
+        return;
+      }
+      // Step 3: find the matching school in SCHOOLS_DATA by user_id.
+      const matchedSchool = Object.values(SCHOOLS_DATA).find(s => s.userId === authData.user.id);
+      if (!matchedSchool) {
+        // Auth succeeded but no matching school found — likely user_id not yet
+        // linked. Fall back to username match for schools not yet fully migrated.
+        const fallback = Object.values(SCHOOLS_DATA).find(s => s.adminUsername === loginInput.user);
+        if (!fallback) {
+          setLoginError("School account not found. Please contact support.");
+          return;
+        }
+        if (fallback.isTrial && !fallback.trialActivated) {
+          const trialEnd = new Date();
+          trialEnd.setDate(trialEnd.getDate() + 30);
+          SCHOOLS_DATA[fallback.id] = { ...fallback, trialActivated: true, trialStartDate: new Date().toISOString().split("T")[0], nextBillingDate: trialEnd.toISOString().split("T")[0] };
+        }
+        setActiveSchoolId(fallback.id);
+        setCurrentUser({ role: "admin" }); setLoginError("");
+        saveSession({ role: "admin", schoolId: fallback.id });
+        loadStudentsForSchool(fallback.id);
+        return;
+      }
+      // Start the 30-day free trial on first login (not at approval time)
+      if (matchedSchool.isTrial && !matchedSchool.trialActivated) {
+        const trialEnd = new Date();
+        trialEnd.setDate(trialEnd.getDate() + 30);
+        SCHOOLS_DATA[matchedSchool.id] = {
+          ...matchedSchool,
+          trialActivated: true,
+          trialStartDate: new Date().toISOString().split("T")[0],
+          nextBillingDate: trialEnd.toISOString().split("T")[0],
+        };
+      }
+      setActiveSchoolId(matchedSchool.id);
+      setCurrentUser({ role: "admin" }); setLoginError("");
+      saveSession({ role: "admin", schoolId: matchedSchool.id });
+      loadStudentsForSchool(matchedSchool.id);
+      return;
+      // ── End Supabase Auth login ──────────────────────────────────
     } else {
       // ── Parent login: phone number as username, last 4 digits as PIN ──
       // A parent logging in fresh has no school selected yet — unlike an
@@ -1949,6 +1985,7 @@ export default function App() {
 
   // ── Shared logout — clears both in-memory state and the saved session ──
   const logout = () => {
+    supabase.auth.signOut();
     setCurrentUser(null);
     setIsSuperAdmin(false);
     setActiveSchoolId(null);
