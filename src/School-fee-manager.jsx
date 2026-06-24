@@ -2628,27 +2628,19 @@ export default function App() {
       .from("staff_payments").insert(staffPayInserts).select();
     if (spError) return notify(`Could not record staff payments: ${spError.message}`, "err");
 
-    // Also record as expenses
-    const expenseInserts = validRows.map((r, idx) => ({
-      school_id: activeSchoolId, category: "Salaries & Wages",
-      description: `${r.matchedStaff.name} (${r.matchedStaff.role}) — ${r.periodLabel}`,
-      amount: r.amount, date: r.date, term: currentTerm, paid_by: adminCreds.username,
-    }));
-    await supabase.from("expenses").insert(expenseInserts);
-
-    const newStaffPayments = (insertedPayments || []).map((p, idx) => ({
+    const newStaffPayments = (insertedPayments || []).map((p) => ({
       id: p.id, schoolId: p.school_id, staffId: p.staff_id, staffName: p.staff_name,
       amount: p.amount, payType: p.pay_type, periodLabel: p.period_label,
       date: p.payment_date, term: p.term, paidBy: p.paid_by || "",
     }));
-    const newExpenseEntries = expenseInserts.map((e, idx) => ({
-      id: `${activeSchoolId}-e${Date.now()}_${idx}`, schoolId: activeSchoolId,
-      category: e.category, description: e.description,
-      amount: e.amount, date: e.date, term: e.term, paidBy: e.paid_by,
+    const newExpenseEntries = validRows.map((r, idx) => ({
+      id: `${activeSchoolId}-e${Date.now()}_${idx}`, schoolId: activeSchoolId, category: "Salaries & Wages",
+      description: `${r.matchedStaff.name} (${r.matchedStaff.role}) — ${r.periodLabel}`,
+      amount: r.amount, date: r.date, term: currentTerm, paidBy: adminCreds.username,
     }));
 
     setAllStaffPayments(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), ...newStaffPayments] }));
-    setAllExpenses(prev => ({ ...prev, [activeSchoolId]: [...prev[activeSchoolId], ...newExpenseEntries] }));
+    setAllExpenses(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), ...newExpenseEntries] }));
 
     setBulkStaffPayImportDone(true);
     const total = validRows.reduce((a, r) => a + r.amount, 0);
