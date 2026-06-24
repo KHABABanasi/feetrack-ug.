@@ -937,10 +937,26 @@ export default function App() {
     }
 
     const newSchoolId = newSchoolRow.id;
+
+    // Create a Supabase Auth account for this school immediately at approval
+    // time, so they can log in right away without any manual migration step.
+    // We reuse the migrate-schools-to-auth Edge Function which handles this
+    // safely — it only processes schools with notify_email set and no user_id.
+    if (school.email) {
+      const { error: authMigrateError } = await supabase.functions.invoke("migrate-schools-to-auth");
+      if (authMigrateError) {
+        // Non-blocking — the school row was created successfully. They can
+        // still log in via the old password fallback until the auth account
+        // is created manually.
+        console.error("Could not create auth account for new school:", authMigrateError.message);
+      }
+    }
+
     SCHOOLS_DATA[newSchoolId] = {
       id: newSchoolId, name: school.schoolName, location: school.location || "Uganda",
       principal: school.principal, phone: school.phone, logo: "🏫",
       notifyEmail: school.email || "",
+      userId: null, // will be populated on next loadSchools() after auth account is created
       adminUsername: school.username || "admin", adminPassword: school.password || "school123",
       setupComplete: false,
       schoolType: school.schoolType || "secondary",
