@@ -1825,9 +1825,11 @@ export default function App() {
     // Use SECURITY DEFINER Postgres functions instead of direct table queries —
     // this works for both authenticated school admins AND unauthenticated parents
     // (who have no Supabase Auth session and would be blocked by RLS otherwise).
-    const [studentsResult, paymentsResult] = await Promise.all([
+    const [studentsResult, paymentsResult, staffResult, staffPaymentsResult] = await Promise.all([
       supabase.rpc("get_students_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_payments_for_school", { p_school_id: schoolId }),
+      supabase.rpc("get_staff_for_school", { p_school_id: schoolId }),
+      supabase.rpc("get_staff_payments_for_school", { p_school_id: schoolId }),
     ]);
     if (studentsResult.error) {
       notify(`Could not load students: ${studentsResult.error.message}`, "err");
@@ -1886,6 +1888,25 @@ export default function App() {
     });
     setAllStudents(prev => ({ ...prev, [schoolId]: loadedStudents }));
     setAllAlumni(prev => ({ ...prev, [schoolId]: loadedAlumni }));
+
+    // Load staff
+    const loadedStaff = (staffResult.data || []).filter(Boolean).map(row => ({
+      id: row.id, schoolId: row.school_id,
+      name: row.name, role: row.role, phone: row.phone || "",
+      defaultRate: row.default_rate || 0,
+      defaultRateType: row.default_rate_type || "daily",
+      active: row.active !== false, photo: row.photo_url || null,
+    }));
+    setAllStaff(prev => ({ ...prev, [schoolId]: loadedStaff }));
+
+    // Load staff payments
+    const loadedStaffPayments = (staffPaymentsResult.data || []).filter(Boolean).map(row => ({
+      id: row.id, schoolId: row.school_id, staffId: row.staff_id, staffName: row.staff_name,
+      amount: row.amount, payType: row.pay_type, periodLabel: row.period_label,
+      date: row.payment_date, term: row.term, paidBy: row.paid_by || "",
+    }));
+    setAllStaffPayments(prev => ({ ...prev, [schoolId]: loadedStaffPayments }));
+
     setStudentsLoading(false);
   };
 
@@ -2592,26 +2613,39 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
-  const handleBulkStaffPayImport = () => {
+  const handleBulkStaffPayImport = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const validRows = bulkStaffPayRows.filter(r => r.valid);
     if (validRows.length === 0) return notify("No valid payments to import", "err");
 
-    const newStaffPayments = [];
-    const newExpenseEntries = [];
-    validRows.forEach((r, idx) => {
-      const spId = `${activeSchoolId}-sp${Date.now()}_${idx}`;
-      newStaffPayments.push({
-        id: spId, schoolId: activeSchoolId, staffId: r.matchedStaff.id, staffName: r.matchedStaff.name,
-        amount: r.amount, payType: r.payType, periodLabel: r.periodLabel,
-        date: r.date, term: currentTerm, paidBy: adminCreds.username,
-      });
-      newExpenseEntries.push({
-        id: `${activeSchoolId}-e${Date.now()}_${idx}`, schoolId: activeSchoolId, category: "Salaries & Wages",
-        description: `${r.matchedStaff.name} (${r.matchedStaff.role}) — ${r.periodLabel}`,
-        amount: r.amount, date: r.date, term: currentTerm, paidBy: adminCreds.username, staffPaymentId: spId,
-      });
-    });
+    const staffPayInserts = validRows.map(r => ({
+      school_id: activeSchoolId, staff_id: r.matchedStaff.id, staff_name: r.matchedStaff.name,
+      amount: r.amount, pay_type: r.payType, period_label: r.periodLabel,
+      payment_date: r.date, term: currentTerm, paid_by: adminCreds.username,
+    }));
+
+    const { data: insertedPayments, error: spError } = await supabase
+      .from("staff_payments").insert(staffPayInserts).select();
+    if (spError) return notify(`Could not record staff payments: ${spError.message}`, "err");
+
+    // Also record as expenses
+    const expenseInserts = validRows.map((r, idx) => ({
+      school_id: activeSchoolId, category: "Salaries & Wages",
+      description: `${r.matchedStaff.name} (${r.matchedStaff.role}) — ${r.periodLabel}`,
+      amount: r.amount, date: r.date, term: currentTerm, paid_by: adminCreds.username,
+    }));
+    await supabase.from("expenses").insert(expenseInserts);
+
+    const newStaffPayments = (insertedPayments || []).map((p, idx) => ({
+      id: p.id, schoolId: p.school_id, staffId: p.staff_id, staffName: p.staff_name,
+      amount: p.amount, payType: p.pay_type, periodLabel: p.period_label,
+      date: p.payment_date, term: p.term, paidBy: p.paid_by || "",
+    }));
+    const newExpenseEntries = expenseInserts.map((e, idx) => ({
+      id: `${activeSchoolId}-e${Date.now()}_${idx}`, schoolId: activeSchoolId,
+      category: e.category, description: e.description,
+      amount: e.amount, date: e.date, term: e.term, paidBy: e.paid_by,
+    }));
 
     setAllStaffPayments(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), ...newStaffPayments] }));
     setAllExpenses(prev => ({ ...prev, [activeSchoolId]: [...prev[activeSchoolId], ...newExpenseEntries] }));
@@ -2647,14 +2681,22 @@ export default function App() {
   };
 
   // ── Staff / Workers ──────────────────────────────────────────────
-  const handleAddStaff = () => {
+  const handleAddStaff = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     if (!newStaff.name || !newStaff.role) return notify("Enter at least a name and role", "err");
-    const st = {
-      id: `${activeSchoolId}-st${Date.now()}`, schoolId: activeSchoolId,
+    const { data: inserted, error } = await supabase.from("staff").insert({
+      school_id: activeSchoolId,
       name: newStaff.name, role: newStaff.role, phone: newStaff.phone || "",
-      defaultRate: parseInt(newStaff.defaultRate) || 0,
-      defaultRateType: newStaff.defaultRateType || "daily",
+      default_rate: parseInt(newStaff.defaultRate) || 0,
+      default_rate_type: newStaff.defaultRateType || "daily",
+      active: true,
+    }).select().single();
+    if (error) return notify(`Could not add staff: ${error.message}`, "err");
+    const st = {
+      id: inserted.id, schoolId: activeSchoolId,
+      name: inserted.name, role: inserted.role, phone: inserted.phone || "",
+      defaultRate: inserted.default_rate || 0,
+      defaultRateType: inserted.default_rate_type || "daily",
       active: true, photo: null,
     };
     setAllStaff(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), st] }));
