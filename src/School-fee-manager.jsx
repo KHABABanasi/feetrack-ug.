@@ -1412,10 +1412,23 @@ export default function App() {
   const savePhoto = async (recordId, dataUrl) => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
 
+    // Convert base64 data URL to binary Blob for Supabase Storage upload
+    const blob = await (await fetch(dataUrl)).blob();
+    const ext = blob.type === "image/png" ? "png" : "jpg";
+
     if (photoUploadType === "staff") {
+      const path = `staff-${recordId}-${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("photos").upload(path, blob, {
+        contentType: blob.type, upsert: true,
+      });
+      if (uploadError) return notify(`Could not upload photo: ${uploadError.message}`, "err");
+      const { data: urlData } = supabase.storage.from("photos").getPublicUrl(path);
+      const publicUrl = urlData.publicUrl;
+      const { error: updateError } = await supabase.from("staff").update({ photo_url: publicUrl }).eq("id", recordId);
+      if (updateError) return notify(`Photo uploaded but could not be linked: ${updateError.message}`, "err");
       setAllStaff(prev => ({
         ...prev,
-        [activeSchoolId]: prev[activeSchoolId].map(s => s.id === recordId ? { ...s, photo: dataUrl } : s)
+        [activeSchoolId]: prev[activeSchoolId].map(s => s.id === recordId ? { ...s, photo: publicUrl } : s)
       }));
       setShowPhotoUpload(null);
       setCameraActive(false);
@@ -1423,12 +1436,7 @@ export default function App() {
       return;
     }
 
-    // Convert the base64 data URL (from file upload or camera capture) into
-    // a real binary Blob, which Supabase Storage's upload API expects.
-    const blob = await (await fetch(dataUrl)).blob();
-    const ext = blob.type === "image/png" ? "png" : "jpg";
     const path = `students-${recordId}-${Date.now()}.${ext}`;
-
     const { error: uploadError } = await supabase.storage.from("photos").upload(path, blob, {
       contentType: blob.type, upsert: true,
     });
@@ -1456,6 +1464,8 @@ export default function App() {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
 
     if (photoUploadType === "staff") {
+      const { error } = await supabase.from("staff").update({ photo_url: null }).eq("id", recordId);
+      if (error) return notify(`Could not remove photo: ${error.message}`, "err");
       setAllStaff(prev => ({
         ...prev,
         [activeSchoolId]: prev[activeSchoolId].map(s => s.id === recordId ? { ...s, photo: null } : s)
