@@ -834,6 +834,19 @@ export default function App() {
     }
   };
 
+  // ── Persist fee structure + requirements to Supabase ────────────
+  // Uses upsert (insert or update) since each school has exactly one
+  // config row. Called after any change to feeStructure or requirements.
+  const saveSchoolConfig = async (newFeeStructure, newRequirements) => {
+    const { error } = await supabase.from("school_config").upsert({
+      school_id: activeSchoolId,
+      fee_structure: newFeeStructure,
+      requirements: newRequirements,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "school_id" });
+    if (error) console.error("Could not save school config:", error.message);
+  };
+
   // ── Add / Remove Fee Structure Line Items ──────────────────────
   const handleAddFeeItem = () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
@@ -846,6 +859,7 @@ export default function App() {
       schoolClasses.forEach(cls => {
         updated[cat][cls] = { ...updated[cat][cls], [name]: amt };
       });
+      saveSchoolConfig(updated, requirements);
       return updated;
     });
     notify(`"${newFeeItemName}" added to ${cat} fee structure (${fmt(amt)} for all classes)`);
@@ -867,6 +881,7 @@ export default function App() {
             const { [field]: removed, ...rest } = prev[cat][cls] || {};
             updated[cat][cls] = rest;
           });
+          saveSchoolConfig(updated, requirements);
           return updated;
         });
         notify(`"${field}" removed from ${cat} fee structure`);
@@ -881,10 +896,14 @@ export default function App() {
     const { cat, cls, field } = feeEditCell;
     const val = parseInt(feeEditVal);
     if (!val || val < 0) return notify("Enter a valid amount", "err");
-    setFeeStructure(prev => ({
-      ...prev,
-      [cat]: { ...prev[cat], [cls]: { ...prev[cat][cls], [field]: val } }
-    }));
+    setFeeStructure(prev => {
+      const updated = {
+        ...prev,
+        [cat]: { ...prev[cat], [cls]: { ...prev[cat][cls], [field]: val } }
+      };
+      saveSchoolConfig(updated, requirements);
+      return updated;
+    });
     setFeeEditCell(null); setFeeEditVal("");
     notify(`${cat} ${cls} ${field} → ${fmt(val)}`);
   };
@@ -893,13 +912,25 @@ export default function App() {
   const handleAddReq = () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     if (!newReq.name.trim() || !newReq.cost) return notify("Fill all fields", "err");
-    setRequirements(prev => [...prev, { id: `r${Date.now()}`, ...newReq, cost: parseInt(newReq.cost) }]);
+    setRequirements(prev => {
+      const updated = [...prev, { id: `r${Date.now()}`, ...newReq, cost: parseInt(newReq.cost) }];
+      saveSchoolConfig(feeStructure, updated);
+      return updated;
+    });
     setShowAddReq(false);
     setNewReq({ name: "", cost: "", appliesTo: ["Day Scholar", "Boarder"], mandatory: true });
     notify("Requirement added");
   };
 
-  const deleteReq = (id) => { if (isReadOnly) return notify("Account is in read-only mode.", "err"); setRequirements(prev => prev.filter(r => r.id !== id)); notify("Requirement removed"); };
+  const deleteReq = (id) => {
+    if (isReadOnly) return notify("Account is in read-only mode.", "err");
+    setRequirements(prev => {
+      const updated = prev.filter(r => r.id !== id);
+      saveSchoolConfig(feeStructure, updated);
+      return updated;
+    });
+    notify("Requirement removed");
+  };
 
   const handleSignupSubmit = async () => {
     const { schoolName, location, principal, phone, email, students, schoolType, billingCycle, username, password, confirmPassword } = signupForm;
@@ -1712,7 +1743,7 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
-  const handleBulkAlumniExcelImport = () => {
+  const handleBulkAlumniExcelImport = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const validRows = bulkAlumniExcelRows.filter(r => r.valid);
     if (validRows.length === 0) return notify("No students marked to move", "err");
@@ -1726,14 +1757,18 @@ export default function App() {
       const row = validRows.find(r => r.matchedStudent.id === s.id);
       const debt = getBalance(s, currentTerm).balance;
       return {
-        ...s,
-        status: "Transferred",
+        ...s, status: "Transferred",
         leftClass: s.class,
         leftYear: currentTerm.split(", ")[1] || promotionYear,
         outstandingDebt: debt,
         leftNote: row.reason || bulkAlumniReason || "Left mid-term",
       };
     });
+
+    // Persist status changes to Supabase
+    await Promise.all(alumniRecords.map(s =>
+      supabase.from("students").update({ status: "Transferred", arrears: s.outstandingDebt || 0 }).eq("id", s.id)
+    ));
 
     setAllStudents(prev => ({ ...prev, [sid]: staying }));
     setAllAlumni(prev => ({ ...prev, [sid]: [...(prev[sid] || []), ...alumniRecords] }));
@@ -1742,14 +1777,22 @@ export default function App() {
   };
 
   // ── Alumni Debt Recovery ─────────────────────────────────────────
-  const handleRecoverDebt = () => {
+  const handleRecoverDebt = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     if (!showRecoverDebt) return;
     const amt = parseInt(recoverAmt.replace(/,/g, ""));
     if (!amt || amt <= 0) return notify("Enter a valid amount", "err");
     if (amt > showRecoverDebt.outstandingDebt) return notify(`Max amount is ${fmt(showRecoverDebt.outstandingDebt)}`, "err");
     const rcpt = nextRcpt();
-    const recoveryPay = { id: rcpt, date: new Date().toISOString().split("T")[0], amount: amt, method: "Cash", receivedBy: adminCreds.username, term: `Recovery-${showRecoverDebt.leftYear}` };
+    const today = new Date().toISOString().split("T")[0];
+    const { data: inserted, error } = await supabase.from("payments").insert({
+      school_id: activeSchoolId, student_id: showRecoverDebt.id,
+      student_name: showRecoverDebt.name, term: `Recovery-${showRecoverDebt.leftYear}`,
+      amount: amt, method: "Cash", received_by: adminCreds.username,
+      payment_date: today, receipt_no: rcpt,
+    }).select().single();
+    if (error) return notify(`Could not record recovery payment: ${error.message}`, "err");
+    const recoveryPay = { id: rcpt, dbId: inserted?.id, date: today, amount: amt, method: "Cash", receivedBy: adminCreds.username, term: `Recovery-${showRecoverDebt.leftYear}` };
     setAllAlumni(prev => ({
       ...prev,
       [activeSchoolId]: prev[activeSchoolId].map(al => al.id === showRecoverDebt.id
@@ -1842,12 +1885,13 @@ export default function App() {
     // Use SECURITY DEFINER Postgres functions instead of direct table queries —
     // this works for both authenticated school admins AND unauthenticated parents
     // (who have no Supabase Auth session and would be blocked by RLS otherwise).
-    const [studentsResult, paymentsResult, staffResult, staffPaymentsResult, expensesResult] = await Promise.all([
+    const [studentsResult, paymentsResult, staffResult, staffPaymentsResult, expensesResult, configResult] = await Promise.all([
       supabase.rpc("get_students_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_payments_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_staff_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_staff_payments_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_expenses_for_school", { p_school_id: schoolId }),
+      supabase.rpc("get_school_config", { p_school_id: schoolId }),
     ]);
     if (studentsResult.error) {
       notify(`Could not load students: ${studentsResult.error.message}`, "err");
@@ -1933,6 +1977,17 @@ export default function App() {
       staffPaymentId: row.staff_payment_id || null,
     }));
     setAllExpenses(prev => ({ ...prev, [schoolId]: loadedExpenses }));
+
+    // Load fee structure and requirements from school_config
+    if (configResult.data && configResult.data.length > 0) {
+      const config = configResult.data[0];
+      if (config.fee_structure && Object.keys(config.fee_structure).length > 0) {
+        setFeeStructure(config.fee_structure);
+      }
+      if (config.requirements && config.requirements.length > 0) {
+        setRequirements(config.requirements);
+      }
+    }
 
     setStudentsLoading(false);
   };
@@ -2499,18 +2554,31 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
-  const handleBulkPayImport = () => {
+  const handleBulkPayImport = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const validRows = bulkPayRows.filter(r => r.valid);
     if (validRows.length === 0) return notify("No valid payments to import", "err");
 
+    const inserts = validRows.map(r => ({
+      school_id: activeSchoolId, student_id: r.matchedStudent.id,
+      student_name: r.matchedStudent.name, term: currentTerm,
+      amount: r.amount, method: r.method || "Cash",
+      received_by: r.receivedBy || adminCreds.username,
+      payment_date: r.date || new Date().toISOString().split("T")[0],
+      receipt_no: nextRcpt(),
+    }));
+
+    const { data: inserted, error } = await supabase.from("payments").insert(inserts).select();
+    if (error) return notify(`Could not record payments: ${error.message}`, "err");
+
     setAllStudents(prev => ({
       ...prev,
       [activeSchoolId]: prev[activeSchoolId].map(s => {
-        const rowsForStudent = validRows.filter(r => r.matchedStudent.id === s.id);
+        const rowsForStudent = (inserted || []).filter(p => p.student_id === s.id);
         if (rowsForStudent.length === 0) return s;
-        const newPayments = rowsForStudent.map(r => ({
-          id: nextRcpt(), date: r.date, amount: r.amount, method: r.method, receivedBy: r.receivedBy, term: currentTerm,
+        const newPayments = rowsForStudent.map(p => ({
+          id: p.receipt_no, dbId: p.id, date: p.payment_date,
+          amount: p.amount, method: p.method, receivedBy: p.received_by, term: p.term,
         }));
         return { ...s, payments: [...s.payments, ...newPayments] };
       })
@@ -2674,16 +2742,22 @@ export default function App() {
     notify(`✓ ${validRows.length} staff payments recorded — total ${fmt(total)}`);
   };
 
-  const handleFeeEdit = () => {
+  const handleFeeEdit = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const { mode, bursaryType, bursaryValue, bursaryReason, customFee } = feeEditData;
+    let updates = {};
+    if (mode === "custom") updates = { bursary_type: null, bursary_value: null, bursary_reason: null, custom_fee: parseInt(customFee) || null };
+    else if (mode === "bursary") updates = { custom_fee: null, bursary_type: bursaryType, bursary_value: parseFloat(bursaryValue), bursary_reason: bursaryReason };
+    else updates = { bursary_type: null, bursary_value: null, bursary_reason: null, custom_fee: null };
+    const { error } = await supabase.from("students").update(updates).eq("id", showFeeEdit.id);
+    if (error) return notify(`Could not update fee: ${error.message}`, "err");
     setAllStudents(prev => ({
       ...prev,
       [activeSchoolId]: prev[activeSchoolId].map(s => {
         if (s.id !== showFeeEdit.id) return s;
         if (mode === "custom") return { ...s, bursary: null, customFee: parseInt(customFee) || null };
         if (mode === "bursary") return { ...s, customFee: null, bursary: { type: bursaryType, value: parseFloat(bursaryValue), reason: bursaryReason } };
-        return { ...s, bursary: null, customFee: null }; // category mode — reset
+        return { ...s, bursary: null, customFee: null };
       })
     }));
     notify(`Fee updated for ${showFeeEdit.name}`);
@@ -2823,24 +2897,22 @@ export default function App() {
     notify("Staff payment deleted");
   };
 
-  const handleRollover = (newTerm) => {
+  const handleRollover = async (newTerm) => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const sid = activeSchoolId;
     const current = allStudents[sid] || [];
     const dnrIds = Object.keys(rolloverDnr).filter(id => rolloverDnr[id]);
     const newAlumni = [];
 
-    // Carry forward arrears for everyone first — must include any arrears already
-    // owed from before this term, not just this term's fee, or old debt silently disappears.
+    // Carry forward arrears for everyone first
     const withArrears = current.map(s => ({ ...s, arrears: getBalance(s, currentTerm).balance }));
 
-    // Split out students marked as "Did Not Return" for the new term
+    // Split out students marked as "Did Not Return"
     const staying = [];
     withArrears.forEach(s => {
       if (dnrIds.includes(String(s.id))) {
         newAlumni.push({
-          ...s,
-          status: "Did Not Return",
+          ...s, status: "Did Not Return",
           leftClass: s.class,
           leftYear: currentTerm.split(", ")[1] || promotionYear,
           outstandingDebt: s.arrears || 0,
@@ -2850,6 +2922,16 @@ export default function App() {
         staying.push(s);
       }
     });
+
+    // Persist arrears for staying students
+    const arrearUpdates = staying.map(s =>
+      supabase.from("students").update({ arrears: s.arrears || 0 }).eq("id", s.id)
+    );
+    // Mark DNR students as alumni in Supabase
+    const alumniUpdates = newAlumni.map(s =>
+      supabase.from("students").update({ status: "Did Not Return", arrears: s.outstandingDebt || 0 }).eq("id", s.id)
+    );
+    await Promise.all([...arrearUpdates, ...alumniUpdates]);
 
     setAllStudents(prev => ({ ...prev, [sid]: staying }));
     if (newAlumni.length > 0) {
@@ -2950,10 +3032,12 @@ export default function App() {
   };
 
   // ── Edit Expense Amount ───────────────────────────────────────
-  const handleEditExpense = () => {
+  const handleEditExpense = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const amt = parseInt(editExpAmt);
     if (!amt || amt <= 0) return notify("Enter valid amount", "err");
+    const { error } = await supabase.from("expenses").update({ amount: amt }).eq("id", showEditExpense.id);
+    if (error) return notify(`Could not update expense: ${error.message}`, "err");
     setAllExpenses(prev => ({
       ...prev,
       [activeSchoolId]: prev[activeSchoolId].map(e =>
@@ -5251,7 +5335,11 @@ export default function App() {
                           onBlur={e => {
                             const val = parseInt(e.target.value);
                             if (val > 0 && val !== r.cost) {
-                              setRequirements(prev => prev.map(req => req.id === r.id ? { ...req, cost: val } : req));
+                              setRequirements(prev => {
+                                const updated = prev.map(req => req.id === r.id ? { ...req, cost: val } : req);
+                                saveSchoolConfig(feeStructure, updated);
+                                return updated;
+                              });
                               notify(`${r.name} cost updated to ${fmt(val)}`);
                             }
                           }}
@@ -5261,7 +5349,11 @@ export default function App() {
                       <td style={{ padding: "10px 14px" }}>
                         <div style={{ display: "flex", gap: 4 }}>
                           {STUDENT_CATEGORIES.map(cat => (
-                            <button key={cat} onClick={() => setRequirements(prev => prev.map(req => req.id === r.id ? { ...req, appliesTo: req.appliesTo.includes(cat) ? req.appliesTo.filter(a => a !== cat) : [...req.appliesTo, cat] } : req))}
+                            <button key={cat} onClick={() => setRequirements(prev => {
+                              const updated = prev.map(req => req.id === r.id ? { ...req, appliesTo: req.appliesTo.includes(cat) ? req.appliesTo.filter(a => a !== cat) : [...req.appliesTo, cat] } : req);
+                              saveSchoolConfig(feeStructure, updated);
+                              return updated;
+                            })}
                               style={{ padding: "2px 8px", borderRadius: 99, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, background: r.appliesTo.includes(cat) ? (cat === "Boarder" ? "#f0fdf4" : "#eff6ff") : "#f1f5f9", color: r.appliesTo.includes(cat) ? (cat === "Boarder" ? "#15803d" : "#2563eb") : "#94a3b8" }}>
                               {cat}
                             </button>
@@ -5269,7 +5361,11 @@ export default function App() {
                         </div>
                       </td>
                       <td style={{ padding: "10px 14px" }}>
-                        <button onClick={() => setRequirements(prev => prev.map(req => req.id === r.id ? { ...req, mandatory: !req.mandatory } : req))}
+                        <button onClick={() => setRequirements(prev => {
+                          const updated = prev.map(req => req.id === r.id ? { ...req, mandatory: !req.mandatory } : req);
+                          saveSchoolConfig(feeStructure, updated);
+                          return updated;
+                        })}
                           style={{ padding: "4px 12px", borderRadius: 99, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 11, background: r.mandatory ? "#d1fae5" : "#fef3c7", color: r.mandatory ? "#065f46" : "#92400e" }}>
                           {r.mandatory ? "✓ Yes — included in fee" : "○ Optional — not in fee"}
                         </button>
