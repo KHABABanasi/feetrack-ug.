@@ -1832,11 +1832,12 @@ export default function App() {
     // Use SECURITY DEFINER Postgres functions instead of direct table queries —
     // this works for both authenticated school admins AND unauthenticated parents
     // (who have no Supabase Auth session and would be blocked by RLS otherwise).
-    const [studentsResult, paymentsResult, staffResult, staffPaymentsResult] = await Promise.all([
+    const [studentsResult, paymentsResult, staffResult, staffPaymentsResult, expensesResult] = await Promise.all([
       supabase.rpc("get_students_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_payments_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_staff_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_staff_payments_for_school", { p_school_id: schoolId }),
+      supabase.rpc("get_expenses_for_school", { p_school_id: schoolId }),
     ]);
     if (studentsResult.error) {
       notify(`Could not load students: ${studentsResult.error.message}`, "err");
@@ -1913,6 +1914,15 @@ export default function App() {
       date: row.payment_date, term: row.term, paidBy: row.paid_by || "",
     }));
     setAllStaffPayments(prev => ({ ...prev, [schoolId]: loadedStaffPayments }));
+
+    // Load expenses
+    const loadedExpenses = (expensesResult.data || []).filter(Boolean).map(row => ({
+      id: row.id, schoolId: row.school_id, category: row.category,
+      description: row.description, amount: row.amount,
+      date: row.date, term: row.term, paidBy: row.paid_by || "",
+      staffPaymentId: row.staff_payment_id || null,
+    }));
+    setAllExpenses(prev => ({ ...prev, [schoolId]: loadedExpenses }));
 
     setStudentsLoading(false);
   };
@@ -2670,10 +2680,19 @@ export default function App() {
     setShowFeeEdit(null);
   };
 
-  const handleAddExpense = () => {
+  const handleAddExpense = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     if (!newExp.description || !newExp.amount) return notify("Fill all fields", "err");
-    const e = { id: `${activeSchoolId}-e${Date.now()}`, schoolId: activeSchoolId, ...newExp, amount: parseInt(newExp.amount), term: currentTerm, paidBy: "Admin" };
+    const { data: inserted, error } = await supabase.from("expenses").insert({
+      school_id: activeSchoolId, category: newExp.category, description: newExp.description,
+      amount: parseInt(newExp.amount), date: newExp.date, term: currentTerm, paid_by: "Admin",
+    }).select().single();
+    if (error) return notify(`Could not save expense: ${error.message}`, "err");
+    const e = {
+      id: inserted.id, schoolId: activeSchoolId, category: inserted.category,
+      description: inserted.description, amount: inserted.amount,
+      date: inserted.date, term: inserted.term, paidBy: inserted.paid_by || "",
+    };
     setAllExpenses(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), e] }));
     notify("Expense recorded");
     setShowAddExp(false); setNewExp({ category: "Salaries", description: "", amount: "", date: new Date().toISOString().split("T")[0] });
@@ -2749,13 +2768,21 @@ export default function App() {
       amount, payType: payStaffForm.payType, periodLabel: payStaffForm.periodLabel,
       date: today, term: currentTerm, paidBy: "Admin",
     };
-    const exp = {
-      id: `${activeSchoolId}-e${Date.now()}`, schoolId: activeSchoolId, category: "Salaries & Wages",
+    // Also insert a linked expense so Net Surplus figures stay accurate
+    const { data: expInserted } = await supabase.from("expenses").insert({
+      school_id: activeSchoolId, category: "Salaries & Wages",
       description: `${showPayStaff.name} (${showPayStaff.role}) — ${payStaffForm.periodLabel}`,
-      amount, date: today, term: currentTerm, paidBy: "Admin", staffPaymentId: inserted.id,
-    };
+      amount, date: today, term: currentTerm, paid_by: "Admin",
+      staff_payment_id: inserted.id,
+    }).select().single();
+    const exp = expInserted ? {
+      id: expInserted.id, schoolId: activeSchoolId, category: expInserted.category,
+      description: expInserted.description, amount: expInserted.amount,
+      date: expInserted.date, term: expInserted.term, paidBy: expInserted.paid_by || "",
+      staffPaymentId: inserted.id,
+    } : null;
     setAllStaffPayments(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), sp] }));
-    setAllExpenses(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), exp] }));
+    if (exp) setAllExpenses(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), exp] }));
     notify(`✓ ${fmt(amount)} paid to ${showPayStaff.name}`);
     setShowPayStaff(null);
     setPayStaffForm({ amount: "", payType: "daily", periodLabel: "" });
@@ -5321,11 +5348,23 @@ export default function App() {
                   </div>
                 )}
 
-                <button onClick={() => {
-                  if (pwForm.currentPw !== adminCreds.password) return setPwError("Current password is incorrect.");
+                <button onClick={async () => {
                   if (pwForm.newPw.length < 6) return setPwError("New password must be at least 6 characters.");
                   if (pwForm.newPw !== pwForm.confirmPw) return setPwError("New passwords do not match.");
-                  setAdminCreds(prev => ({ ...prev, password: pwForm.newPw }));
+                  // Verify current password by re-authenticating with Supabase Auth
+                  const school = SCHOOLS_DATA[activeSchoolId];
+                  const notifyEmail = school?.notifyEmail;
+                  if (!notifyEmail) return setPwError("No email set for this school. Set one in School Profile first.");
+                  const { error: verifyError } = await supabase.auth.signInWithPassword({
+                    email: notifyEmail, password: pwForm.currentPw,
+                  });
+                  if (verifyError) return setPwError("Current password is incorrect.");
+                  // Update password in Supabase Auth
+                  const { error: updateError } = await supabase.auth.updateUser({ password: pwForm.newPw });
+                  if (updateError) return setPwError(`Could not update password: ${updateError.message}`);
+                  // Also update admin_password column so it stays in sync
+                  await supabase.from("schools").update({ admin_password: pwForm.newPw }).eq("id", activeSchoolId);
+                  SCHOOLS_DATA[activeSchoolId].adminPassword = pwForm.newPw;
                   setPwForm({ currentPw: "", newPw: "", confirmPw: "" });
                   setPwError("");
                   notify("Password changed successfully ✓");
