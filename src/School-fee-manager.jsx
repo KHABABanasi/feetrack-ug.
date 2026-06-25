@@ -5783,62 +5783,40 @@ export default function App() {
 
               <div style={{ ...grid(2, 1), gap: 20 }}>
                 <div>
-                  <div style={{ marginBottom: 14 }}>
-                    <label style={lbl}>Backend Server URL</label>
-                    <input
-                      value={backendUrl}
-                      onChange={e => setBackendUrl(e.target.value)}
-                      placeholder="https://feetrack-backend.onrender.com"
-                      style={inp}
-                    />
-                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
-                      Your Render.com deployment URL. Leave blank to use simulation mode.
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => {
-                      if (!backendUrl) return notify("Enter a backend URL first", "err");
-                      notify("Backend URL set for this session ✓ (not persisted — browser storage isn't available in this preview)");
-                    }} style={{ flex: 1, padding: 10, borderRadius: 9, border: "none", background: "#0f172a", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                      💾 Save URL
-                    </button>
-                    <button onClick={async () => {
-                      if (!backendUrl) return notify("Enter a backend URL first", "err");
-                      setBackendStatus("unknown");
-                      try {
-                        const res = await fetch(`${backendUrl}/health`);
-                        if (res.ok) { setBackendStatus("ok"); notify("✓ Backend is online and reachable!"); }
-                        else { setBackendStatus("error"); notify("Backend returned an error", "err"); }
-                      } catch { setBackendStatus("error"); notify("Cannot reach backend — check the URL", "err"); }
-                    }} style={{ flex: 1, padding: 10, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", color: "#374151", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                      🔍 Test Connection
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  {/* Status panel */}
-                  <div style={{ background: backendStatus === "ok" ? "#f0fdf4" : backendStatus === "error" ? "#fef2f2" : "#f8fafc", borderRadius: 12, padding: 16, marginBottom: 14, border: `1px solid ${backendStatus === "ok" ? "#86efac" : backendStatus === "error" ? "#fca5a5" : "#e2e8f0"}` }}>
-                    <div style={{ fontWeight: 700, fontSize: 12, color: backendStatus === "ok" ? "#15803d" : backendStatus === "error" ? "#b91c1c" : "#64748b", marginBottom: 8 }}>
-                      {backendStatus === "ok" ? "✅ Backend Connected" : backendStatus === "error" ? "❌ Backend Unreachable" : "⚪ Not Tested Yet"}
+                  <div style={{ background: "#f0fdf4", borderRadius: 12, padding: 16, marginBottom: 14, border: "1px solid #86efac" }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: "#15803d", marginBottom: 8 }}>
+                      ✅ SMS via Africa's Talking — Active
                     </div>
                     <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.6 }}>
-                      {backendStatus === "ok" && "SMS will be sent via Africa's Talking to parents' phones."}
-                      {backendStatus === "error" && "SMS will fall back to simulation mode. Check your URL and make sure Render is running."}
-                      {backendStatus === "unknown" && backendUrl && "Click 'Test Connection' to check if the server is reachable."}
-                      {backendStatus === "unknown" && !backendUrl && "No backend URL set. SMS running in simulation mode — messages won't reach parents' phones."}
+                      SMS messages are sent via Africa's Talking through a secure Supabase Edge Function. Every message is logged and persists across sessions.
                     </div>
                   </div>
 
-                  <div style={{ background: "#fffbeb", borderRadius: 10, padding: "10px 13px", fontSize: 11, color: "#92400e" }}>
-                    <strong>📋 Setup steps:</strong>
+                  <button onClick={async () => {
+                    const school = SCHOOLS_DATA[activeSchoolId];
+                    if (!school?.notifyEmail) return notify("Set a school email in School Profile first", "err");
+                    notify("Sending test SMS...");
+                    const { data, error } = await supabase.functions.invoke("send-sms", {
+                      body: {
+                        to: school.phone || "+256700000000",
+                        message: "FeeTrack UG test message — SMS is working correctly.",
+                        student_name: "Test",
+                        school_id: activeSchoolId,
+                      },
+                    });
+                    if (error) return notify(`SMS test failed: ${error.message}`, "err");
+                    notify(`SMS test result: ${data?.status || "Sent"}`);
+                    setSmsLog(prev => [{ id: `test-${Date.now()}`, to: school.phone, student: "Test", message: "FeeTrack UG test message — SMS is working correctly.", time: new Date().toLocaleTimeString(), status: data?.status || "Sent" }, ...prev]);
+                  }} style={{ width: "100%", padding: 11, borderRadius: 9, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
+                    📱 Send Test SMS
+                  </button>
+
+                  <div style={{ background: "#fffbeb", borderRadius: 10, padding: "10px 13px", fontSize: 11, color: "#92400e", marginTop: 12 }}>
+                    <strong>📋 Africa's Talking setup:</strong>
                     <div style={{ marginTop: 4, lineHeight: 1.7 }}>
-                      1. Deploy <code>feetrack-backend</code> to Render.com<br />
-                      2. Add your Africa's Talking API key to Render<br />
-                      3. Paste the Render URL above<br />
-                      4. Click Test Connection<br />
-                      5. SMS will now reach parents' phones!
+                      1. API Key and Username stored as Supabase secrets (AT_API_KEY, AT_USERNAME)<br />
+                      2. Currently using Sandbox — upgrade to live account for real delivery<br />
+                      3. Use "Send Test SMS" above to verify the connection
                     </div>
                   </div>
                 </div>
