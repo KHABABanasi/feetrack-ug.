@@ -806,10 +806,12 @@ export default function App() {
     const message = `Dear ${student.parent}, UGX ${payment.amount.toLocaleString()} received for ${student.name} (${student.class}) on ${fmtDate(payment.date)}. Balance: UGX ${balance.toLocaleString()}. Ref: ${payment.id}. ${schoolObj.name.split(" ").slice(0,2).join(" ")}.`;
     const time = new Date().toLocaleTimeString();
 
+    const rawPhone = student.phone || "";
+    const phone = rawPhone.startsWith("+") ? rawPhone : "+256" + rawPhone.replace(/^0/, "");
     try {
       const { data, error } = await supabase.functions.invoke("send-sms", {
         body: {
-          to: student.phone,
+          to: phone,
           message,
           student_name: student.name,
           school_id: activeSchoolId,
@@ -5795,10 +5797,12 @@ export default function App() {
                   <button onClick={async () => {
                     const school = SCHOOLS_DATA[activeSchoolId];
                     if (!school?.notifyEmail) return notify("Set a school email in School Profile first", "err");
+                    const rawPhone = school.phone || "";
+                    const phone = rawPhone.startsWith("+") ? rawPhone : "+256" + rawPhone.replace(/^0/, "");
                     notify("Sending test SMS...");
                     const { data, error } = await supabase.functions.invoke("send-sms", {
                       body: {
-                        to: school.phone || "+256700000000",
+                        to: phone,
                         message: "FeeTrack UG test message — SMS is working correctly.",
                         student_name: "Test",
                         school_id: activeSchoolId,
