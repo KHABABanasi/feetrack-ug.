@@ -2723,9 +2723,15 @@ export default function App() {
     setNewStaff({ name: "", role: "", phone: "", defaultRate: "", defaultRateType: "daily" });
   };
 
-  const handleEditStaff = () => {
+  const handleEditStaff = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     if (!showEditStaff) return;
+    const { error } = await supabase.from("staff").update({
+      name: showEditStaff.name, role: showEditStaff.role, phone: showEditStaff.phone,
+      default_rate: parseInt(showEditStaff.defaultRate) || 0,
+      default_rate_type: showEditStaff.defaultRateType,
+    }).eq("id", showEditStaff.id);
+    if (error) return notify(`Could not update staff: ${error.message}`, "err");
     setAllStaff(prev => ({
       ...prev,
       [activeSchoolId]: prev[activeSchoolId].map(s => s.id === showEditStaff.id ? {
@@ -2737,11 +2743,16 @@ export default function App() {
     setShowEditStaff(null);
   };
 
-  const handleToggleStaffActive = (staffId) => {
+  const handleToggleStaffActive = async (staffId) => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
+    const current = (allStaff[activeSchoolId] || []).find(s => s.id === staffId);
+    if (!current) return;
+    const newActive = !current.active;
+    const { error } = await supabase.from("staff").update({ active: newActive }).eq("id", staffId);
+    if (error) return notify(`Could not update staff status: ${error.message}`, "err");
     setAllStaff(prev => ({
       ...prev,
-      [activeSchoolId]: prev[activeSchoolId].map(s => s.id === staffId ? { ...s, active: !s.active } : s),
+      [activeSchoolId]: prev[activeSchoolId].map(s => s.id === staffId ? { ...s, active: newActive } : s),
     }));
   };
 
@@ -2788,13 +2799,17 @@ export default function App() {
     setPayStaffForm({ amount: "", payType: "daily", periodLabel: "" });
   };
 
-  const handleDeleteStaffPayment = (paymentId) => {
+  const handleDeleteStaffPayment = async (paymentId) => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const sp = staffPayments.find(p => p.id === paymentId);
     if (!sp) return;
+    // Delete the staff payment from Supabase
+    const { error } = await supabase.from("staff_payments").delete().eq("id", paymentId);
+    if (error) return notify(`Could not delete payment: ${error.message}`, "err");
+    // Delete the linked expense too (cascade isn't set, so delete explicitly)
+    await supabase.from("expenses").delete().eq("staff_payment_id", paymentId);
     setAllStaffPayments(prev => ({ ...prev, [activeSchoolId]: prev[activeSchoolId].filter(p => p.id !== paymentId) }));
-    // Also remove the matching auto-created expense so Net Surplus stays correct
-    setAllExpenses(prev => ({ ...prev, [activeSchoolId]: prev[activeSchoolId].filter(e => e.staffPaymentId !== paymentId) }));
+    setAllExpenses(prev => ({ ...prev, [activeSchoolId]: (prev[activeSchoolId] || []).filter(e => e.staffPaymentId !== paymentId) }));
     notify("Staff payment deleted");
   };
 
@@ -4786,8 +4801,10 @@ export default function App() {
                       title: "Delete Expense",
                       message: `Delete this ${e.category.toLowerCase()} expense of ${fmt(e.amount)}? This cannot be undone.`,
                       danger: true,
-                      onConfirm: () => {
-                        setAllExpenses(prev => ({ ...prev, [activeSchoolId]: prev[activeSchoolId].filter(ex => ex.id !== e.id) }));
+                      onConfirm: async () => {
+                        const { error } = await supabase.from("expenses").delete().eq("id", e.id);
+                        if (error) return notify(`Could not delete expense: ${error.message}`, "err");
+                        setAllExpenses(prev => ({ ...prev, [activeSchoolId]: (prev[activeSchoolId] || []).filter(ex => ex.id !== e.id) }));
                         notify("Expense deleted");
                       },
                     })}
