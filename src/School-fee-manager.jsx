@@ -1269,10 +1269,20 @@ export default function App() {
           nextBillingDate: nextDue.toISOString().split("T")[0],
           isTrial: false,
           paymentNoticeFreeze: false,
-          // A plan switch ends any custom rate negotiated for the old plan; staying on
-          // the same plan keeps the existing custom price (handled by ...matchedSchool above)
           ...(planSwitched ? { customPrice: null, customPriceNote: "" } : {}),
         };
+        // Persist subscription update to Supabase
+        supabase.from("schools").update({
+          plan: newPlan,
+          subscription_status: "Active",
+          last_payment_date: today.toISOString().split("T")[0],
+          next_billing_date: nextDue.toISOString().split("T")[0],
+          is_trial: false,
+          payment_notice_freeze: false,
+          ...(planSwitched ? { custom_price: null, custom_price_note: "" } : {}),
+        }).eq("id", matchedSchool.id).then(({ error }) => {
+          if (error) console.error("Could not persist subscription update for", matchedSchool.name, error.message);
+        });
         setPaymentNotices(prev => prev.map(n => n.schoolId === matchedSchool.id && n.status === "pending" ? { ...n, status: "confirmed" } : n));
 
         results.matched.push({
@@ -1358,40 +1368,47 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
-  const handleBankImport = () => {
+  const handleBankImport = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
-    let imported = 0;
-    const newStudents = [...(allStudents[activeSchoolId] || [])];
+    const toInsert = [];
+    const currentStudents = allStudents[activeSchoolId] || [];
 
     bankRows.forEach(row => {
       const studentId = bankMatched[row.rowIndex];
-      if (!studentId) return; // skip unmatched
-      const sIdx = newStudents.findIndex(s => s.id === studentId);
-      if (sIdx === -1) return;
-
-      // Avoid duplicate imports (check same date + amount + method)
-      const alreadyExists = newStudents[sIdx].payments.some(p =>
+      if (!studentId) return;
+      const student = currentStudents.find(s => s.id === studentId);
+      if (!student) return;
+      const alreadyExists = student.payments.some(p =>
         p.amount === row.amount && p.method === "Bank" && p.term === currentTerm
       );
       if (alreadyExists) return;
-
-      const rcpt = nextRcpt();
-      const newPay = {
-        id: rcpt,
-        date: row.date || new Date().toISOString().split("T")[0],
-        amount: row.amount,
-        method: "Bank",
-        receivedBy: "Bank Import",
-        term: currentTerm,
-        bankRef: row.reference,
-      };
-      newStudents[sIdx] = { ...newStudents[sIdx], payments: [...newStudents[sIdx].payments, newPay] };
-      imported++;
+      toInsert.push({
+        school_id: activeSchoolId, student_id: studentId,
+        student_name: student.name, term: currentTerm,
+        amount: row.amount, method: "Bank",
+        received_by: "Bank Import",
+        payment_date: row.date || new Date().toISOString().split("T")[0],
+        receipt_no: nextRcpt(),
+      });
     });
 
-    setAllStudents(prev => ({ ...prev, [activeSchoolId]: newStudents }));
+    if (toInsert.length === 0) return notify("No new payments to import", "err");
+
+    const { data: inserted, error } = await supabase.from("payments").insert(toInsert).select();
+    if (error) return notify(`Could not import payments: ${error.message}`, "err");
+
+    setAllStudents(prev => ({
+      ...prev,
+      [activeSchoolId]: prev[activeSchoolId].map(s => {
+        const newPays = (inserted || []).filter(p => p.student_id === s.id).map(p => ({
+          id: p.receipt_no, dbId: p.id, date: p.payment_date,
+          amount: p.amount, method: p.method, receivedBy: p.received_by, term: p.term,
+        }));
+        return newPays.length > 0 ? { ...s, payments: [...s.payments, ...newPays] } : s;
+      })
+    }));
     setBankImportDone(true);
-    notify(`✓ ${imported} bank payments imported successfully`);
+    notify(`✓ ${inserted.length} bank payments imported successfully`);
   };
   const handleFilePhoto = (e) => {
     const file = e.target.files[0];
