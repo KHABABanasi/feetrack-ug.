@@ -801,36 +801,24 @@ export default function App() {
     setActivityLog(prev => [{ id: `act-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, action, detail, at: new Date().toISOString() }, ...prev].slice(0, 200));
   };
 
-  // ── Real SMS sender — calls Python backend ─────────────────────
+  // ── Real SMS sender — calls send-sms Edge Function ────────────
   const sendRealSMS = async (student, payment, schoolObj, balance) => {
     const message = `Dear ${student.parent}, UGX ${payment.amount.toLocaleString()} received for ${student.name} (${student.class}) on ${fmtDate(payment.date)}. Balance: UGX ${balance.toLocaleString()}. Ref: ${payment.id}. ${schoolObj.name.split(" ").slice(0,2).join(" ")}.`;
-
-    // If no backend configured, fall back to simulation
-    if (!backendUrl) {
-      setSmsLog(prev => [{ id: payment.id, to: student.phone, student: student.name, message, time: new Date().toLocaleTimeString(), status: "Simulated (no backend)" }, ...prev]);
-      return;
-    }
+    const time = new Date().toLocaleTimeString();
 
     try {
-      const res = await fetch(`${backendUrl}/sms/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phone: student.phone,
+      const { data, error } = await supabase.functions.invoke("send-sms", {
+        body: {
+          to: student.phone,
           message,
           student_name: student.name,
-          receipt_id: payment.id,
-          school_name: schoolObj.name,
-        }),
+          school_id: activeSchoolId,
+        },
       });
-      const data = await res.json();
-      if (res.ok) {
-        setSmsLog(prev => [{ id: payment.id, to: student.phone, student: student.name, message, time: new Date().toLocaleTimeString(), status: `Sent ✓ (${data.cost || ""})` }, ...prev]);
-      } else {
-        setSmsLog(prev => [{ id: payment.id, to: student.phone, student: student.name, message, time: new Date().toLocaleTimeString(), status: `Failed: ${data.detail}` }, ...prev]);
-      }
+      const status = error ? `Error: ${error.message}` : (data?.status || "Sent ✓");
+      setSmsLog(prev => [{ id: payment.id, to: student.phone, student: student.name, message, time, status }, ...prev]);
     } catch (err) {
-      setSmsLog(prev => [{ id: payment.id, to: student.phone, student: student.name, message, time: new Date().toLocaleTimeString(), status: `Error: ${err.message}` }, ...prev]);
+      setSmsLog(prev => [{ id: payment.id, to: student.phone, student: student.name, message, time, status: `Error: ${err.message}` }, ...prev]);
     }
   };
 
@@ -1902,13 +1890,14 @@ export default function App() {
     // Use SECURITY DEFINER Postgres functions instead of direct table queries —
     // this works for both authenticated school admins AND unauthenticated parents
     // (who have no Supabase Auth session and would be blocked by RLS otherwise).
-    const [studentsResult, paymentsResult, staffResult, staffPaymentsResult, expensesResult, configResult] = await Promise.all([
+    const [studentsResult, paymentsResult, staffResult, staffPaymentsResult, expensesResult, configResult, smsResult] = await Promise.all([
       supabase.rpc("get_students_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_payments_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_staff_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_staff_payments_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_expenses_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_school_config", { p_school_id: schoolId }),
+      supabase.rpc("get_sms_log_for_school", { p_school_id: schoolId }),
     ]);
     if (studentsResult.error) {
       notify(`Could not load students: ${studentsResult.error.message}`, "err");
@@ -2005,6 +1994,14 @@ export default function App() {
         setRequirements(config.requirements);
       }
     }
+
+    // Load SMS log
+    const loadedSmsLog = (smsResult.data || []).filter(Boolean).map(row => ({
+      id: row.id, to: row.phone, student: row.student_name,
+      message: row.message, status: row.status,
+      time: new Date(row.sent_at).toLocaleTimeString(),
+    }));
+    setSmsLog(loadedSmsLog);
 
     setStudentsLoading(false);
   };
