@@ -1054,48 +1054,44 @@ export default function App() {
 
   // ── Subscription / Billing Handlers (Super Admin) ──────────────
   const markSubscriptionPaid = async (schoolId) => {
-    let sch = SCHOOLS_DATA[schoolId];
-    if (!sch) {
-      // Super admin — school data not in memory, fetch from Supabase
-      const { data, error } = await supabase.from("schools").select("*").eq("id", schoolId).single();
-      if (error || !data) return notify("Could not load school data", "err");
-      sch = {
-        id: data.id, name: data.name, plan: data.plan || "Starter",
-        billingCycle: data.billing_cycle || "monthly",
-        customPrice: data.custom_price,
-      };
-    }
+    const notice = paymentNotices.find(n => n.schoolId === schoolId && n.status === "pending");
+    const sch = SCHOOLS_DATA[schoolId];
+    const plan = sch?.plan || "Starter";
+    const billingCycle = sch?.billingCycle || "monthly";
+    const customPrice = sch?.customPrice || null;
+    const billing = getBillingInfo(plan, billingCycle, customPrice);
     const today = new Date();
     const nextDue = new Date();
-    const billing = getBillingInfo(sch.plan, sch.billingCycle, sch.customPrice);
     nextDue.setDate(nextDue.getDate() + billing.cycleDays);
-    const updates = {
-      subscription_status: "Active",
-      last_payment_date: today.toISOString().split("T")[0],
-      next_billing_date: nextDue.toISOString().split("T")[0],
-      is_trial: false,
-      payment_notice_freeze: false,
-    };
-    const { error: updateError } = await supabase.from("schools").update(updates).eq("id", schoolId);
-    if (updateError) return notify(`Could not update school: ${updateError.message}`, "err");
+    const lastPaymentDate = today.toISOString().split("T")[0];
+    const nextBillingDate = nextDue.toISOString().split("T")[0];
+
+    const { data, error } = await supabase.functions.invoke("confirm-payment", {
+      body: {
+        school_id: schoolId,
+        notice_id: notice?.id || null,
+        action: "confirm",
+        last_payment_date: lastPaymentDate,
+        next_billing_date: nextBillingDate,
+      },
+    });
+    if (error || !data?.success) return notify(`Could not confirm payment: ${error?.message || "Unknown error"}`, "err");
+
     if (SCHOOLS_DATA[schoolId]) {
       SCHOOLS_DATA[schoolId] = {
         ...SCHOOLS_DATA[schoolId],
         subscriptionStatus: "Active",
-        lastPaymentDate: today.toISOString().split("T")[0],
-        nextBillingDate: nextDue.toISOString().split("T")[0],
+        lastPaymentDate,
+        nextBillingDate,
         isTrial: false,
         paymentNoticeFreeze: false,
       };
     }
     setSubscriptionRefresh(r => r + 1);
-    // Mark payment notices as confirmed in Supabase
-    supabase.from("payment_notices").update({ status: "confirmed" })
-      .eq("school_id", schoolId).eq("status", "pending")
-      .then(({ error }) => { if (error) console.error("Could not update payment notices:", error.message); });
     setPaymentNotices(prev => prev.map(n => n.schoolId === schoolId && n.status === "pending" ? { ...n, status: "confirmed" } : n));
-    logActivity("Payment Confirmed", `${sch.name} marked as paid (${sch.plan}, ${fmt(billing.price)}${billing.periodLabel}) — next due ${fmtDate(nextDue.toISOString().split("T")[0])}`);
-    notify(`✓ ${sch.name} marked as paid — next billing date ${fmtDate(nextDue.toISOString().split("T")[0])}`);
+    const schoolName = sch?.name || notice?.schoolName || "School";
+    logActivity("Payment Confirmed", `${schoolName} marked as paid — next due ${fmtDate(nextBillingDate)}`);
+    notify(`✓ ${schoolName} marked as paid — next billing date ${fmtDate(nextBillingDate)}`);
   };
 
   // Manual plan change by Super Admin. Clears any custom negotiated price, since a
@@ -1198,8 +1194,10 @@ export default function App() {
   const rejectPaymentNotice = async (id) => {
     const notice = paymentNotices.find(n => n.id === id);
     if (!notice) return;
-    await supabase.from("payment_notices").update({ status: "not_found" }).eq("id", id);
-    await supabase.from("schools").update({ payment_notice_freeze: false }).eq("id", notice.schoolId);
+    const { data, error } = await supabase.functions.invoke("confirm-payment", {
+      body: { school_id: notice.schoolId, notice_id: id, action: "reject" },
+    });
+    if (error || !data?.success) return notify(`Could not reject notice: ${error?.message || "Unknown error"}`, "err");
     setPaymentNotices(prev => prev.map(n => n.id === id ? { ...n, status: "not_found" } : n));
     if (SCHOOLS_DATA[notice.schoolId]) {
       SCHOOLS_DATA[notice.schoolId] = { ...SCHOOLS_DATA[notice.schoolId], paymentNoticeFreeze: false };
