@@ -394,6 +394,7 @@ export default function App() {
   });
   const [search, setSearch] = useState("");
   const [paymentsTermFilter, setPaymentsTermFilter] = useState("current"); // "current" | "all" | specific term string
+  const [paymentsSearch, setPaymentsSearch] = useState("");
   const [filterClass, setFilterClass] = useState("All");
   const [filterStatus, setFilterStatus] = useState("All");
 
@@ -4788,6 +4789,9 @@ export default function App() {
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input value={paymentsSearch || ""} onChange={e => setPaymentsSearch(e.target.value)}
+                  placeholder="🔍 Search student name..."
+                  style={{ padding: "9px 14px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 13, outline: "none", background: "#fff", minWidth: 180 }} />
                 <select value={paymentsTermFilter} onChange={e => setPaymentsTermFilter(e.target.value)}
                   style={{ padding: "9px 12px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 12, fontWeight: 600, outline: "none", background: "#fff", cursor: "pointer" }}>
                   <option value="current">Current Term ({currentTerm})</option>
@@ -4826,7 +4830,7 @@ export default function App() {
                   <div key={h} style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.3 }}>{h}</div>
                 ))}
               </div>
-              {allPayments.map((p, i) => (
+              {allPayments.filter(p => !paymentsSearch || p.studentName.toLowerCase().includes(paymentsSearch.toLowerCase())).map((p, i) => (
                 <div key={p.id + i} style={{ display: "grid", gridTemplateColumns: paymentsTermFilter === "all" ? "1fr 1.3fr 0.5fr 1fr 1fr 1fr 1fr 0.9fr 0.6fr" : "1fr 1.3fr 0.5fr 1fr 1fr 1fr 0.9fr 0.6fr", gap: 4, alignItems: "center", padding: "10px 16px", borderTop: "1px solid #f1f5f9", background: i % 2 === 0 ? "#fff" : "#fafbfc" }}>
                   <div style={{ fontFamily: "monospace", fontSize: 11, color: "#3b82f6", fontWeight: 700 }}>{p.id}</div>
                   <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a" }}>
@@ -4840,7 +4844,7 @@ export default function App() {
                   <div style={{ fontSize: 12, color: "#374151" }}>{METHOD_ICON[p.method] || "💰"} {p.method}</div>
                   <div style={{ fontSize: 12, color: "#64748b" }}>{p.receivedBy}</div>
                   <button onClick={() => {
-                    const student = allStudentsAndAlumni.find(s => s.name === p.studentName);
+                    const student = allStudentsAndAlumni.find(s => s.payments && s.payments.some(px => px.id === p.id));
                     let newBalance = 0;
                     if (student) {
                       const due = getBalance(student, p.term).totalDue;
