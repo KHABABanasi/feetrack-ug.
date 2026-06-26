@@ -3657,12 +3657,7 @@ export default function App() {
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       <button onClick={() => markSubscriptionPaid(n.schoolId)} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 9, padding: "8px 14px", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>✓ Confirm (+{getBillingInfo(SCHOOLS_DATA[n.schoolId]?.plan, SCHOOLS_DATA[n.schoolId]?.billingCycle, SCHOOLS_DATA[n.schoolId]?.customPrice).cycleDays} days)</button>
-                      <button onClick={() => setConfirmDialog({
-                        title: "Payment Not Received",
-                        message: `Confirm payment from ${n.schoolName} was NOT received? This removes their protection and resumes normal grace period / suspension rules.`,
-                        danger: true,
-                        onConfirm: () => rejectPaymentNotice(n.id),
-                      })} style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 9, padding: "8px 14px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✗ Not Received</button>
+                      <button onClick={() => rejectPaymentNotice(n.id)} style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 9, padding: "8px 14px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✗ Not Received</button>
                     </div>
                   </div>
                 ))}
