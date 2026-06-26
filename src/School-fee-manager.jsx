@@ -3682,6 +3682,19 @@ export default function App() {
               </div>
             )}
 
+            {/* Confirmed Payment Notices */}
+            {paymentNotices.filter(n => n.status === "confirmed").length > 0 && (
+              <div style={{ ...card, marginBottom: 20, border: "1px solid #86efac", background: "#f0fdf4" }}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: "#15803d", marginBottom: 4 }}>✓ Confirmed Payments</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>These payment notices have been confirmed and the schools' subscriptions renewed.</div>
+                {paymentNotices.filter(n => n.status === "confirmed").map(n => (
+                  <div key={n.id} style={{ fontSize: 12, color: "#374151", padding: "6px 0", borderTop: "1px solid #bbf7d0" }}>
+                    ✓ {n.schoolName} · {n.method} · {fmt(n.amount)} · {fmtDate(n.date)} · Ref: {n.billingRef}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Automatic Reconciliation */}
             <div style={{ ...card, marginBottom: 20, border: "2px solid #8b5cf6", background: "linear-gradient(135deg,#f5f3ff,#fff)" }}>
               <div style={{ fontWeight: 800, fontSize: 15, color: "#6d28d9", marginBottom: 4 }}>⚡ Automatic Subscription Renewal</div>
