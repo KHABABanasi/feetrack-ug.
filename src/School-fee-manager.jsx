@@ -5223,8 +5223,10 @@ export default function App() {
                   title: "Reset Fee Structure",
                   message: "Reset all fees to original defaults? Any custom fee amounts you've set for this school will be lost.",
                   danger: true,
-                  onConfirm: () => {
-                    setFeeStructure(JSON.parse(JSON.stringify(DEFAULT_FEE_STRUCTURE)));
+                  onConfirm: async () => {
+                    const defaultFees = JSON.parse(JSON.stringify(DEFAULT_FEE_STRUCTURE));
+                    setFeeStructure(defaultFees);
+                    await saveSchoolConfig(defaultFees, requirements);
                     notify("Fees reset to defaults");
                   },
                 })}
