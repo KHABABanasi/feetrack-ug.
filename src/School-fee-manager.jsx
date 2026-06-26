@@ -766,6 +766,7 @@ export default function App() {
   const [newFeeItemName, setNewFeeItemName] = useState("");
   const [newFeeItemAmt, setNewFeeItemAmt] = useState("");
   const [showEditPayment, setShowEditPayment] = useState(null); // { student, payment }
+  const [showEditStudent, setShowEditStudent] = useState(null); // student being edited
   const [editPayAmt, setEditPayAmt] = useState("");
   const [showMoveAlumni, setShowMoveAlumni] = useState(null); // student being moved manually
   const [moveAlumniReason, setMoveAlumniReason] = useState("Transferred to another school");
@@ -2217,6 +2218,23 @@ export default function App() {
     setShowReceipt({ payment: newPay, student: updatedStudent, school, newBalance: newBal });
     notify(`${fmt(amount)} recorded — ${rcpt}`);
     setShowPay(null); setPayAmt(""); setPayMethod("Cash");
+  };
+
+  const handleSaveEditStudent = async () => {
+    if (!showEditStudent) return;
+    const { id, name, class: cls, stream, gender, category, parent, phone } = showEditStudent;
+    if (!name.trim()) return notify("Student name is required", "err");
+    const { error } = await supabase.from("students").update({
+      name: name.trim(), class: cls, stream: stream || "",
+      gender, category, parent_name: parent || "", phone: phone || "",
+    }).eq("id", id);
+    if (error) return notify(`Could not update student: ${error.message}`, "err");
+    setAllStudents(prev => ({
+      ...prev,
+      [activeSchoolId]: prev[activeSchoolId].map(s => s.id === id ? { ...s, name: name.trim(), class: cls, stream: stream || "", gender, category, parent: parent || "", phone: phone || "" } : s),
+    }));
+    notify(`${name} updated ✓`);
+    setShowEditStudent(null);
   };
 
   const handleAddStudent = async () => {
@@ -4700,6 +4718,7 @@ export default function App() {
                       <div><Badge status={st} /></div>
                       <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
                         {st !== "Paid" && !isReadOnly && <button onClick={e => { e.stopPropagation(); setShowPay(s); }} style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 7, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Pay</button>}
+                        {!isReadOnly && <button onClick={e => { e.stopPropagation(); setShowEditStudent({ ...s }); }} style={{ background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a", borderRadius: 7, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>✏ Edit</button>}
                         <button onClick={e => { e.stopPropagation(); setShowFeeEdit(s); setFeeEditData({ mode: s.customFee ? "custom" : s.bursary ? "bursary" : "category", bursaryType: s.bursary?.type || "percent", bursaryValue: s.bursary?.value || "", bursaryReason: s.bursary?.reason || "", customFee: s.customFee || "" }); }} style={{ background: "#f1f5f9", color: "#374151", border: "1px solid #e2e8f0", borderRadius: 7, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>⚙ Fee</button>
                         <button onClick={e => { e.stopPropagation(); setShowMoveAlumni(s); setMoveAlumniReason("Transferred to another school"); }} title="Move to Alumni (transfer/dropout)" style={{ background: "#f5f3ff", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 7, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>🎓 Alumni</button>
                         <span style={{ color: "#94a3b8", fontSize: 13 }}>{isOpen ? "▲" : "▼"}</span>
@@ -6090,6 +6109,69 @@ export default function App() {
                 style={{ flex: 1, padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>Cancel</button>
               <button onClick={handleEditPayment}
                 style={{ flex: 1, padding: 11, borderRadius: 9, border: "none", background: "#f59e0b", color: "#0f172a", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Save Correction</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ════════ EDIT STUDENT MODAL ════════ */}
+      {showEditStudent && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: isMobile ? 18 : 26, width: isMobile ? "calc(100vw - 32px)" : 480, maxWidth: 480, boxShadow: "0 24px 60px rgba(0,0,0,0.25)", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", marginBottom: 4 }}>✏ Edit Student</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 20 }}>Update {showEditStudent.name}'s details</div>
+
+            {[
+              { label: "Full Name", key: "name", type: "text", required: true },
+              { label: "Parent / Guardian Name", key: "parent", type: "text" },
+              { label: "Phone Number", key: "phone", type: "tel" },
+            ].map(({ label, key, type, required }) => (
+              <div key={key} style={{ marginBottom: 14 }}>
+                <label style={lbl}>{label}{required && " *"}</label>
+                <input type={type} value={showEditStudent[key] || ""} onChange={e => setShowEditStudent(prev => ({ ...prev, [key]: e.target.value }))}
+                  style={{ width: "100%", padding: "10px 14px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+              </div>
+            ))}
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+              <div>
+                <label style={lbl}>Class</label>
+                <select value={showEditStudent.class || ""} onChange={e => setShowEditStudent(prev => ({ ...prev, class: e.target.value, stream: "" }))}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 13, outline: "none", background: "#fff" }}>
+                  {schoolClasses.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={lbl}>Stream</label>
+                <select value={showEditStudent.stream || ""} onChange={e => setShowEditStudent(prev => ({ ...prev, stream: e.target.value }))}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 13, outline: "none", background: "#fff" }}>
+                  <option value="">No Stream</option>
+                  {getClassStreams(showEditStudent.class || "").map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={lbl}>Gender</label>
+                <select value={showEditStudent.gender || "M"} onChange={e => setShowEditStudent(prev => ({ ...prev, gender: e.target.value }))}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 13, outline: "none", background: "#fff" }}>
+                  <option value="M">Male</option>
+                  <option value="F">Female</option>
+                </select>
+              </div>
+              <div>
+                <label style={lbl}>Category</label>
+                <select value={showEditStudent.category || "Day Scholar"} onChange={e => setShowEditStudent(prev => ({ ...prev, category: e.target.value }))}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 13, outline: "none", background: "#fff" }}>
+                  <option value="Day Scholar">Day Scholar</option>
+                  <option value="Boarder">Boarder</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+              <button onClick={() => setShowEditStudent(null)}
+                style={{ flex: 1, padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>Cancel</button>
+              <button onClick={handleSaveEditStudent}
+                style={{ flex: 1, padding: 11, borderRadius: 9, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Save Changes</button>
             </div>
           </div>
         </div>
