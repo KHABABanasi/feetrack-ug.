@@ -1053,21 +1053,41 @@ export default function App() {
   };
 
   // ── Subscription / Billing Handlers (Super Admin) ──────────────
-  const markSubscriptionPaid = (schoolId) => {
-    const sch = SCHOOLS_DATA[schoolId];
-    if (!sch) return;
+  const markSubscriptionPaid = async (schoolId) => {
+    let sch = SCHOOLS_DATA[schoolId];
+    if (!sch) {
+      // Super admin — school data not in memory, fetch from Supabase
+      const { data, error } = await supabase.from("schools").select("*").eq("id", schoolId).single();
+      if (error || !data) return notify("Could not load school data", "err");
+      sch = {
+        id: data.id, name: data.name, plan: data.plan || "Starter",
+        billingCycle: data.billing_cycle || "monthly",
+        customPrice: data.custom_price,
+      };
+    }
     const today = new Date();
     const nextDue = new Date();
     const billing = getBillingInfo(sch.plan, sch.billingCycle, sch.customPrice);
     nextDue.setDate(nextDue.getDate() + billing.cycleDays);
-    SCHOOLS_DATA[schoolId] = {
-      ...sch,
-      subscriptionStatus: "Active",
-      lastPaymentDate: today.toISOString().split("T")[0],
-      nextBillingDate: nextDue.toISOString().split("T")[0],
-      isTrial: false,
-      paymentNoticeFreeze: false,
+    const updates = {
+      subscription_status: "Active",
+      last_payment_date: today.toISOString().split("T")[0],
+      next_billing_date: nextDue.toISOString().split("T")[0],
+      is_trial: false,
+      payment_notice_freeze: false,
     };
+    const { error: updateError } = await supabase.from("schools").update(updates).eq("id", schoolId);
+    if (updateError) return notify(`Could not update school: ${updateError.message}`, "err");
+    if (SCHOOLS_DATA[schoolId]) {
+      SCHOOLS_DATA[schoolId] = {
+        ...SCHOOLS_DATA[schoolId],
+        subscriptionStatus: "Active",
+        lastPaymentDate: today.toISOString().split("T")[0],
+        nextBillingDate: nextDue.toISOString().split("T")[0],
+        isTrial: false,
+        paymentNoticeFreeze: false,
+      };
+    }
     setSubscriptionRefresh(r => r + 1);
     // Mark payment notices as confirmed in Supabase
     supabase.from("payment_notices").update({ status: "confirmed" })
@@ -1181,7 +1201,9 @@ export default function App() {
     await supabase.from("payment_notices").update({ status: "not_found" }).eq("id", id);
     await supabase.from("schools").update({ payment_notice_freeze: false }).eq("id", notice.schoolId);
     setPaymentNotices(prev => prev.map(n => n.id === id ? { ...n, status: "not_found" } : n));
-    SCHOOLS_DATA[notice.schoolId] = { ...SCHOOLS_DATA[notice.schoolId], paymentNoticeFreeze: false };
+    if (SCHOOLS_DATA[notice.schoolId]) {
+      SCHOOLS_DATA[notice.schoolId] = { ...SCHOOLS_DATA[notice.schoolId], paymentNoticeFreeze: false };
+    }
     setSubscriptionRefresh(r => r + 1);
     logActivity("Payment Notice Rejected", `${notice.schoolName} — ${fmt(notice.amount)} via ${notice.method} not found`);
     notify(`${notice.schoolName} notified — payment not found, protection removed`);
