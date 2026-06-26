@@ -5516,10 +5516,13 @@ export default function App() {
                   <input id="new-username" placeholder="Enter new username" style={inp} />
                 </div>
 
-                <button onClick={() => {
+                <button onClick={async () => {
                   const val = document.getElementById("new-username").value.trim();
                   if (!val) return notify("Enter a username", "err");
                   if (val.length < 3) return notify("Username must be at least 3 characters", "err");
+                  const { error } = await supabase.from("schools").update({ admin_username: val }).eq("id", activeSchoolId);
+                  if (error) return notify(`Could not update username: ${error.message}`, "err");
+                  SCHOOLS_DATA[activeSchoolId].adminUsername = val;
                   setAdminCreds(prev => ({ ...prev, username: val }));
                   document.getElementById("new-username").value = "";
                   notify(`Username changed to "${val}" ✓`);
@@ -5646,7 +5649,14 @@ export default function App() {
                   🚪 Log Out Now
                 </button>
 
-                <button onClick={logout}
+                <button onClick={() => {
+                  clearSession();
+                  setCurrentUser(null);
+                  setActiveSchoolId(null);
+                  setTab("dashboard");
+                  setLoginInput({ user: "", pass: "" });
+                  notify("Screen locked — log in again to continue");
+                }}
                   style={{ width: "100%", padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", color: "#374151", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
                   🔒 Lock Screen
                 </button>
