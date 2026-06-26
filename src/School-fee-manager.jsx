@@ -4449,7 +4449,9 @@ export default function App() {
                   <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>🕐 Recent Payments</div>
                   <button onClick={() => setTab("payments")} style={{ fontSize: 11, color: "#3b82f6", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>View All →</button>
                 </div>
-                {allPayments.slice(0, 6).map((p, i) => (
+                {allStudentsAndAlumni.flatMap(s =>
+                  (s.payments || []).map(p => ({ ...p, studentName: s.name }))
+                ).sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 6).map((p, i) => (
                   <div key={p.id + i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < 5 ? "1px solid #f1f5f9" : "none" }}>
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a" }}>{p.studentName}</div>
