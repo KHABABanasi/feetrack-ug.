@@ -2213,10 +2213,9 @@ export default function App() {
       [activeSchoolId]: prev[activeSchoolId].map(s => s.id === showPay.id
         ? { ...s, payments: [...s.payments, newPay] } : s)
     }));
-    if (sendSMS) sendRealSMS(showPay, newPay, school, newBal);
     const updatedStudent = { ...showPay, payments: [...showPay.payments, newPay] };
     setShowReceipt({ payment: newPay, student: updatedStudent, school, newBalance: newBal });
-    notify(`${fmt(amount)} recorded — ${rcpt}${sendSMS ? " · SMS sent" : ""}`);
+    notify(`${fmt(amount)} recorded — ${rcpt}`);
     setShowPay(null); setPayAmt(""); setPayMethod("Cash");
   };
 
@@ -4090,7 +4089,6 @@ export default function App() {
     { id: "payments", icon: "◈", label: "Payments" },
     { id: "expenses", icon: "◇", label: "Expenses" },
     { id: "staff", icon: "👷", label: "Staff & Wages" },
-    { id: "sms", icon: "✉", label: "SMS Log" },
     { id: "reports", icon: "▤", label: "Reports" },
     { id: "alumni", icon: "🎓", label: "Alumni / Leavers" },
   ];
@@ -5142,45 +5140,6 @@ export default function App() {
         })()}
 
         {/* ════════ SMS LOG ════════ */}
-        {tab === "sms" && (
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", marginBottom: 6 }}>SMS Notifications Log</div>
-            <div style={{ color: "#64748b", fontSize: 13, marginBottom: 20 }}>{smsLog.length} messages sent via Africa's Talking API</div>
-            {smsLog.length === 0
-              ? (
-                <div style={{ ...card, textAlign: "center", padding: 60 }}>
-                  <div style={{ fontSize: 40, marginBottom: 12 }}>📱</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>No SMS sent yet</div>
-                  <div style={{ fontSize: 13, color: "#64748b" }}>Record a payment with "Send SMS" enabled to see messages here</div>
-                </div>
-              )
-              : (
-                <div style={{ ...card, padding: 0, overflow: "hidden" }}>
-                  {smsLog.map((s, i) => (
-                    <div key={s.id} style={{ padding: "14px 18px", borderTop: i > 0 ? "1px solid #f1f5f9" : "none", background: i % 2 === 0 ? "#fff" : "#fafbfc" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <span style={{ fontSize: 18 }}>📱</span>
-                          <div>
-                            <span style={{ fontWeight: 700, fontSize: 13, color: "#0f172a" }}>{s.student}</span>
-                            <span style={{ fontSize: 12, color: "#94a3b8", marginLeft: 8 }}>{s.to}</span>
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{s.time}</span>
-                          <span style={{ background: "#d1fae5", color: "#065f46", padding: "2px 8px", borderRadius: 99, fontSize: 11, fontWeight: 700 }}>{s.status}</span>
-                        </div>
-                      </div>
-                      <div style={{ background: "#f8fafc", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#374151", lineHeight: 1.5, fontStyle: "italic" }}>
-                        "{s.message}"
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-          </div>
-        )}
-
         {/* ════════ REPORTS ════════ */}
         {tab === "reports" && (
           <div>
@@ -5778,54 +5737,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* SMS Backend Configuration */}
-            <div style={{ ...card, marginTop: 20 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", marginBottom: 4 }}>📱 SMS Backend Configuration</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 20 }}>Connect to your deployed Python backend to send real SMS via Africa's Talking</div>
-
-              <div style={{ ...grid(2, 1), gap: 20 }}>
-                <div>
-                  <div style={{ background: "#f0fdf4", borderRadius: 12, padding: 16, marginBottom: 14, border: "1px solid #86efac" }}>
-                    <div style={{ fontWeight: 700, fontSize: 12, color: "#15803d", marginBottom: 8 }}>
-                      ✅ SMS via Africa's Talking — Active
-                    </div>
-                    <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.6 }}>
-                      SMS messages are sent via Africa's Talking through a secure Supabase Edge Function. Every message is logged and persists across sessions.
-                    </div>
-                  </div>
-
-                  <button onClick={async () => {
-                    const school = SCHOOLS_DATA[activeSchoolId];
-                    if (!school?.notifyEmail) return notify("Set a school email in School Profile first", "err");
-                    const rawPhone = school.phone || "";
-                    const phone = rawPhone.startsWith("+") ? rawPhone : "+256" + rawPhone.replace(/^0/, "");
-                    notify("Sending test SMS...");
-                    const { data, error } = await supabase.functions.invoke("send-sms", {
-                      body: {
-                        to: phone,
-                        message: "FeeTrack UG test message — SMS is working correctly.",
-                        student_name: "Test",
-                        school_id: activeSchoolId,
-                      },
-                    });
-                    if (error) return notify(`SMS test failed: ${error.message}`, "err");
-                    notify(`SMS test result: ${data?.status || "Sent"}`);
-                    setSmsLog(prev => [{ id: `test-${Date.now()}`, to: school.phone, student: "Test", message: "FeeTrack UG test message — SMS is working correctly.", time: new Date().toLocaleTimeString(), status: data?.status || "Sent" }, ...prev]);
-                  }} style={{ width: "100%", padding: 11, borderRadius: 9, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
-                    📱 Send Test SMS
-                  </button>
-
-                  <div style={{ background: "#fffbeb", borderRadius: 10, padding: "10px 13px", fontSize: 11, color: "#92400e", marginTop: 12 }}>
-                    <strong>📋 Africa's Talking setup:</strong>
-                    <div style={{ marginTop: 4, lineHeight: 1.7 }}>
-                      1. API Key and Username stored as Supabase secrets (AT_API_KEY, AT_USERNAME)<br />
-                      2. Currently using Sandbox — upgrade to live account for real delivery<br />
-                      3. Use "Send Test SMS" above to verify the connection
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         )}
 
@@ -6830,12 +6741,6 @@ export default function App() {
                   </button>
                 ))}
               </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 13px", background: "#f0fdf4", borderRadius: 9, marginBottom: 18, cursor: "pointer" }} onClick={() => setSendSMS(!sendSMS)}>
-              <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${sendSMS ? "#10b981" : "#e2e8f0"}`, background: sendSMS ? "#10b981" : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {sendSMS && <span style={{ color: "#fff", fontSize: 11, fontWeight: 800 }}>✓</span>}
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>📱 Send SMS to {showPay.parent} ({showPay.phone})</span>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => { setShowPay(null); setPayAmt(""); }} style={{ flex: 1, padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>Cancel</button>
