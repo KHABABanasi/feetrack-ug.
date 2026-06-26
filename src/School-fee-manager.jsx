@@ -675,30 +675,34 @@ export default function App() {
   // through the real signup form and stored in Supabase.
   useEffect(() => {
     let cancelled = false;
-    async function loadPendingSignups() {
-      const { data, error } = await supabase.from("pending_signups").select("*").order("submitted_at", { ascending: false });
+    async function loadSuperAdminData() {
+      // Load pending signups
+      const { data: signups, error: signupsError } = await supabase.from("pending_signups").select("*").order("submitted_at", { ascending: false });
       if (cancelled) return;
-      if (error) {
-        console.error("Failed to load pending signups:", error.message);
-        return;
+      if (!signupsError) {
+        setPendingSchools((signups || []).map(row => ({
+          id: row.id, schoolName: row.school_name, location: row.location,
+          principal: row.principal, phone: row.phone, email: row.email,
+          students: row.students_estimate, schoolType: row.school_type,
+          billingCycle: row.billing_cycle, username: row.requested_username,
+          password: row.requested_password,
+          submittedAt: row.submitted_at ? row.submitted_at.split("T")[0] : "",
+          status: row.status,
+        })));
       }
-      setPendingSchools((data || []).map(row => ({
-        id: row.id,
-        schoolName: row.school_name,
-        location: row.location,
-        principal: row.principal,
-        phone: row.phone,
-        email: row.email,
-        students: row.students_estimate,
-        schoolType: row.school_type,
-        billingCycle: row.billing_cycle,
-        username: row.requested_username,
-        password: row.requested_password,
-        submittedAt: row.submitted_at ? row.submitted_at.split("T")[0] : "",
-        status: row.status,
-      })));
+      // Load payment notices
+      const { data: notices, error: noticesError } = await supabase.from("payment_notices").select("*").order("submitted_at", { ascending: false });
+      if (cancelled) return;
+      if (!noticesError) {
+        setPaymentNotices((notices || []).map(row => ({
+          id: row.id, schoolId: row.school_id, schoolName: row.school_name,
+          billingRef: row.billing_ref, method: row.method, amount: row.amount,
+          date: row.date, note: row.note, submittedAt: row.submitted_at,
+          status: row.status,
+        })));
+      }
     }
-    loadPendingSignups();
+    loadSuperAdminData();
     return () => { cancelled = true; };
   }, []);
 
@@ -1065,6 +1069,10 @@ export default function App() {
       paymentNoticeFreeze: false,
     };
     setSubscriptionRefresh(r => r + 1);
+    // Mark payment notices as confirmed in Supabase
+    supabase.from("payment_notices").update({ status: "confirmed" })
+      .eq("school_id", schoolId).eq("status", "pending")
+      .then(({ error }) => { if (error) console.error("Could not update payment notices:", error.message); });
     setPaymentNotices(prev => prev.map(n => n.schoolId === schoolId && n.status === "pending" ? { ...n, status: "confirmed" } : n));
     logActivity("Payment Confirmed", `${sch.name} marked as paid (${sch.plan}, ${fmt(billing.price)}${billing.periodLabel}) — next due ${fmtDate(nextDue.toISOString().split("T")[0])}`);
     notify(`✓ ${sch.name} marked as paid — next billing date ${fmtDate(nextDue.toISOString().split("T")[0])}`);
@@ -1142,18 +1150,23 @@ export default function App() {
   };
 
   // ── "I've Sent Payment" Confirmation (school notifies super admin) ──
-  const submitPaymentNotice = () => {
+  const submitPaymentNotice = async () => {
     const amt = parseInt(paymentConfirmForm.amount.replace(/,/g, ""));
     if (!amt || amt <= 0) return notify("Enter the amount you sent", "err");
-    const notice = {
-      id: `pn-${Date.now()}`,
-      schoolId: activeSchoolId, schoolName: school.name, billingRef: school.billingRef,
+    const { data: inserted, error } = await supabase.from("payment_notices").insert({
+      school_id: activeSchoolId, school_name: school.name, billing_ref: school.billingRef || "",
       method: paymentConfirmForm.method, amount: amt, date: paymentConfirmForm.date,
-      note: paymentConfirmForm.note, submittedAt: new Date().toISOString(),
-      status: "pending",
+      note: paymentConfirmForm.note, status: "pending",
+    }).select().single();
+    if (error) return notify(`Could not submit notice: ${error.message}`, "err");
+    const notice = {
+      id: inserted.id, schoolId: activeSchoolId, schoolName: school.name, billingRef: school.billingRef,
+      method: inserted.method, amount: inserted.amount, date: inserted.date,
+      note: inserted.note, submittedAt: inserted.submitted_at, status: "pending",
     };
     setPaymentNotices(prev => [notice, ...prev]);
-    // Freeze countdown / lift suspension while the notice is under review
+    // Freeze countdown while notice is under review
+    await supabase.from("schools").update({ payment_notice_freeze: true }).eq("id", activeSchoolId);
     SCHOOLS_DATA[activeSchoolId] = { ...SCHOOLS_DATA[activeSchoolId], paymentNoticeFreeze: true };
     setSubscriptionRefresh(r => r + 1);
     setShowPaymentConfirm(false);
@@ -1162,9 +1175,11 @@ export default function App() {
   };
 
   // Payment was NOT found / not received — unfreeze and flag it so the school sees it
-  const rejectPaymentNotice = (id) => {
+  const rejectPaymentNotice = async (id) => {
     const notice = paymentNotices.find(n => n.id === id);
     if (!notice) return;
+    await supabase.from("payment_notices").update({ status: "not_found" }).eq("id", id);
+    await supabase.from("schools").update({ payment_notice_freeze: false }).eq("id", notice.schoolId);
     setPaymentNotices(prev => prev.map(n => n.id === id ? { ...n, status: "not_found" } : n));
     SCHOOLS_DATA[notice.schoolId] = { ...SCHOOLS_DATA[notice.schoolId], paymentNoticeFreeze: false };
     setSubscriptionRefresh(r => r + 1);
