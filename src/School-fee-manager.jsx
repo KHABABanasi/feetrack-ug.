@@ -477,6 +477,7 @@ export default function App() {
 
   // Bank reconciliation
   const [bankRows, setBankRows] = useState([]); // parsed from uploaded CSV/Excel
+  const [lastBankImportIds, setLastBankImportIds] = useState([]); // db IDs of last import for undo
 
   // Subscription payment auto-reconciliation (super admin)
   const [subPayRows, setSubPayRows] = useState([]);
@@ -1436,13 +1437,20 @@ export default function App() {
           return { rowIndex: i, date, amount, reference, raw: row };
         }).filter(r => r.amount > 0); // only rows with a credit amount
 
-        // Auto-match: try to find student by name in reference
+        // Auto-match: require at least the full last name (longest word in name)
+        // to appear in the reference — avoids false matches on common first names
         const matched = {};
         parsed.forEach(r => {
           const refLower = r.reference.toLowerCase();
-          const match = termStudents.find(s =>
-            s.name.toLowerCase().split(" ").some(part => part.length > 2 && refLower.includes(part))
-          );
+          const match = termStudents.find(s => {
+            const parts = s.name.toLowerCase().split(" ").filter(p => p.length > 3);
+            if (parts.length === 0) return false;
+            // Require the longest name part to match (usually the surname)
+            const longest = parts.reduce((a, b) => a.length >= b.length ? a : b);
+            // Also check if at least 2 parts match for extra confidence
+            const matchCount = parts.filter(p => refLower.includes(p)).length;
+            return refLower.includes(longest) && matchCount >= Math.min(2, parts.length);
+          });
           if (match) matched[r.rowIndex] = match.id;
         });
 
@@ -1495,6 +1503,7 @@ export default function App() {
         return newPays.length > 0 ? { ...s, payments: [...s.payments, ...newPays] } : s;
       })
     }));
+    setLastBankImportIds((inserted || []).map(p => p.id));
     setBankImportDone(true);
     notify(`✓ ${inserted.length} bank payments imported successfully`);
   };
@@ -6131,8 +6140,32 @@ export default function App() {
                       </button>
                     )}
                     {bankImportDone && (
-                      <div style={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac", borderRadius: 9, padding: "9px 14px", fontWeight: 700, fontSize: 12 }}>
-                        ✅ Import Complete
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <div style={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac", borderRadius: 9, padding: "9px 14px", fontWeight: 700, fontSize: 12 }}>
+                          ✅ Import Complete
+                        </div>
+                        {lastBankImportIds.length > 0 && (
+                          <button onClick={() => setConfirmDialog({
+                            title: "Undo Bank Import",
+                            message: `Delete all ${lastBankImportIds.length} payments from this import? This cannot be undone.`,
+                            danger: true,
+                            onConfirm: async () => {
+                              const { error } = await supabase.from("payments").delete().in("id", lastBankImportIds);
+                              if (error) return notify(`Could not undo import: ${error.message}`, "err");
+                              setAllStudents(prev => ({
+                                ...prev,
+                                [activeSchoolId]: prev[activeSchoolId].map(s => ({
+                                  ...s, payments: s.payments.filter(p => !lastBankImportIds.includes(p.dbId))
+                                }))
+                              }));
+                              setLastBankImportIds([]);
+                              setBankImportDone(false);
+                              notify("Bank import reversed — all imported payments deleted");
+                            },
+                          })} style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 9, padding: "9px 14px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                            ↺ Undo Import
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
