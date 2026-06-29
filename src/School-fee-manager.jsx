@@ -4977,16 +4977,18 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ ...grid(4, 2), gap: 12, marginBottom: 18 }}>
+            <div style={{ ...grid(5, 2), gap: 12, marginBottom: 18 }}>
               {[
+                { label: "Total Collected", value: fmt(allPayments.reduce((a, p) => a + p.amount, 0)), color: "#10b981" },
                 { label: "Transactions", value: allPayments.length, color: "#3b82f6" },
-                { label: "Cash", value: allPayments.filter(p => p.method === "Cash").length, color: "#10b981" },
+                { label: "Cash", value: allPayments.filter(p => p.method === "Cash").length, color: "#64748b" },
                 { label: "MTN MoMo", value: allPayments.filter(p => p.method === "MTN MoMo").length, color: "#f59e0b" },
                 { label: "Bank / Airtel", value: allPayments.filter(p => ["Bank", "Airtel Money"].includes(p.method)).length, color: "#8b5cf6" },
               ].map((c, i) => (
                 <div key={i} style={{ ...card, borderTop: `3px solid ${c.color}`, padding: "12px 16px" }}>
                   <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", marginBottom: 4 }}>{c.label}</div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: "#0f172a" }}>{c.value}</div>
+                  <div style={{ fontSize: i === 0 ? 18 : 26, fontWeight: 800, color: "#0f172a" }}>{c.value}</div>
+                  <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>{paymentsTermFilter === "all" ? "All Terms" : paymentsTermFilter === "current" ? currentTerm : paymentsTermFilter}</div>
                 </div>
               ))}
             </div>
