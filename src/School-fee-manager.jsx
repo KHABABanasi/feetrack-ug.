@@ -4829,11 +4829,12 @@ export default function App() {
                 <option value="All">All Status</option>
                 <option>Paid</option><option>Partial</option><option>Unpaid</option>
               </select>
-              <select value={filterClass === "All" && filterStatus === "All" ? "All" : "All"}
-                onChange={e => { setFilterClass("All"); setFilterStatus("All"); setSearch(""); }}
-                style={{ flex: isMobile ? "1 1 30%" : "none", padding: "10px 12px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 13, outline: "none", background: "#f1f5f9", cursor: "pointer", color: "#64748b", fontWeight: 600 }}>
-                <option value="All">Clear Filters</option>
-              </select>
+              {(search || filterClass !== "All" || filterStatus !== "All") && (
+                <button onClick={() => { setFilterClass("All"); setFilterStatus("All"); setSearch(""); }}
+                  style={{ flex: isMobile ? "1 1 30%" : "none", padding: "10px 14px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 13, background: "#f1f5f9", cursor: "pointer", color: "#64748b", fontWeight: 600 }}>
+                  ✕ Clear Filters
+                </button>
+              )}
             </div>
 
             <div style={{ ...card, padding: 0, overflow: "hidden" }}>
@@ -4900,43 +4901,54 @@ export default function App() {
                     {/* Expanded payment timeline */}
                     {isOpen && (
                       <div style={{ background: "#f0f7ff", borderTop: "1px solid #bfdbfe", borderBottom: "1px solid #bfdbfe", padding: "16px 24px" }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: "#1e3a8a", marginBottom: 12 }}>📋 Payment History — {s.name} ({s.class}) · {currentTerm}</div>
-                        {s.payments.filter(p => p.term === currentTerm).length === 0
-                          ? <div style={{ color: "#ef4444", fontSize: 13, fontWeight: 600 }}>No payments this term. Balance due: {fmt(tf)}</div>
-                          : (
-                            <div style={{ position: "relative", paddingLeft: 26 }}>
-                              <div style={{ position: "absolute", left: 8, top: 0, bottom: 0, width: 2, background: "#bfdbfe" }} />
-                              {s.payments.filter(p => p.term === currentTerm).map((p, pi) => (
-                                <div key={p.id} style={{ position: "relative", marginBottom: 12 }}>
-                                  <div style={{ position: "absolute", left: -22, top: 4, width: 10, height: 10, borderRadius: "50%", background: "#3b82f6", border: "2px solid #fff" }} />
-                                  <div style={{ background: "#fff", borderRadius: 9, padding: "10px 14px", border: "1px solid #bfdbfe", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                    <div>
-                                      <div style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 3 }}>
-                                        <span style={{ fontFamily: "monospace", fontSize: 11, color: "#3b82f6", fontWeight: 700, background: "#eff6ff", padding: "1px 6px", borderRadius: 5 }}>{p.id}</span>
-                                        <span style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>{METHOD_ICON[p.method]} {p.method}</span>
-                                        <span style={{ fontSize: 11, color: "#94a3b8" }}>· {p.receivedBy}</span>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: "#1e3a8a" }}>📋 Payment History — {s.name} ({s.class})</div>
+                          <button onClick={e => { e.stopPropagation(); setExpandedId(isOpen ? `${s.id}_all` : null); }}
+                            style={{ fontSize: 11, color: "#3b82f6", background: "none", border: "1px solid #bfdbfe", borderRadius: 7, padding: "3px 10px", cursor: "pointer", fontWeight: 600 }}>
+                            {expandedId === `${s.id}_all` ? "Current Term Only" : "Show All Terms"}
+                          </button>
+                        </div>
+                        {(() => {
+                          const showAll = expandedId === `${s.id}_all`;
+                          const displayPayments = showAll ? s.payments : s.payments.filter(p => p.term === currentTerm);
+                          return displayPayments.length === 0
+                            ? <div style={{ color: "#ef4444", fontSize: 13, fontWeight: 600 }}>No payments {showAll ? "recorded" : "this term"}. Balance due: {fmt(tf)}</div>
+                            : (
+                              <div style={{ position: "relative", paddingLeft: 26 }}>
+                                <div style={{ position: "absolute", left: 8, top: 0, bottom: 0, width: 2, background: "#bfdbfe" }} />
+                                {displayPayments.map((p, pi) => (
+                                  <div key={p.id} style={{ position: "relative", marginBottom: 12 }}>
+                                    <div style={{ position: "absolute", left: -22, top: 4, width: 10, height: 10, borderRadius: "50%", background: "#3b82f6", border: "2px solid #fff" }} />
+                                    <div style={{ background: "#fff", borderRadius: 9, padding: "10px 14px", border: "1px solid #bfdbfe", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                      <div>
+                                        <div style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 3 }}>
+                                          <span style={{ fontFamily: "monospace", fontSize: 11, color: "#3b82f6", fontWeight: 700, background: "#eff6ff", padding: "1px 6px", borderRadius: 5 }}>{p.id}</span>
+                                          <span style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>{METHOD_ICON[p.method]} {p.method}</span>
+                                          <span style={{ fontSize: 11, color: "#94a3b8" }}>· {p.receivedBy}</span>
+                                          {showAll && <span style={{ fontSize: 10, color: "#7c3aed", background: "#f5f3ff", borderRadius: 5, padding: "1px 6px", fontWeight: 700 }}>{p.term}</span>}
+                                        </div>
+                                        <div style={{ fontSize: 11, color: "#64748b" }}>📅 {fmtDate(p.date)}</div>
                                       </div>
-                                      <div style={{ fontSize: 11, color: "#64748b" }}>📅 {fmtDate(p.date)}</div>
-                                    </div>
-                                    <div style={{ textAlign: "right" }}>
-                                      <div style={{ fontSize: 15, fontWeight: 800, color: "#15803d" }}>{fmt(p.amount)}</div>
-                                      <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
-                                        <button onClick={() => setShowReceipt({ payment: p, student: s, school, newBalance: tf - s.payments.filter(px => px.term === currentTerm && px.id <= p.id).reduce((a, px) => a + px.amount, 0) })} style={{ fontSize: 10, color: "#3b82f6", background: "none", border: "1px solid #bfdbfe", borderRadius: 5, padding: "2px 7px", cursor: "pointer" }}>Receipt</button>
-                                        <button onClick={() => { setShowEditPayment({ student: s, payment: p }); setEditPayAmt(String(p.amount)); }} style={{ fontSize: 10, color: "#f59e0b", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 5, padding: "2px 7px", cursor: "pointer", fontWeight: 700 }}>✏ Edit</button>
-                                        <button onClick={() => handleDeletePayment(s, p.id)} style={{ fontSize: 10, color: "#ef4444", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 5, padding: "2px 7px", cursor: "pointer", fontWeight: 700 }}>🗑 Delete</button>
+                                      <div style={{ textAlign: "right" }}>
+                                        <div style={{ fontSize: 15, fontWeight: 800, color: "#15803d" }}>{fmt(p.amount)}</div>
+                                        <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                                          <button onClick={() => setShowReceipt({ payment: p, student: s, school, newBalance: tf - s.payments.filter(px => px.term === currentTerm && px.id <= p.id).reduce((a, px) => a + px.amount, 0) })} style={{ fontSize: 10, color: "#3b82f6", background: "none", border: "1px solid #bfdbfe", borderRadius: 5, padding: "2px 7px", cursor: "pointer" }}>Receipt</button>
+                                          <button onClick={() => { setShowEditPayment({ student: s, payment: p }); setEditPayAmt(String(p.amount)); }} style={{ fontSize: 10, color: "#f59e0b", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 5, padding: "2px 7px", cursor: "pointer", fontWeight: 700 }}>✏ Edit</button>
+                                          <button onClick={() => handleDeletePayment(s, p.id)} style={{ fontSize: 10, color: "#ef4444", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 5, padding: "2px 7px", cursor: "pointer", fontWeight: 700 }}>🗑 Delete</button>
+                                        </div>
                                       </div>
                                     </div>
                                   </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                                ))}
+                              </div>
+                            );
+                        })()}
                         <div style={{ display: "flex", gap: 10, marginTop: 10, padding: "9px 13px", background: "#fff", borderRadius: 9, border: "1px solid #bfdbfe", fontSize: 12, color: "#64748b" }}>
-                          <span>Paid: <strong style={{ color: "#15803d" }}>{fmt(paid)}</strong></span>
+                          <span>Paid this term: <strong style={{ color: "#15803d" }}>{fmt(paid)}</strong></span>
                           <span>|</span>
                           <span>Balance: <strong style={{ color: bal > 0 ? "#dc2626" : "#15803d" }}>{fmt(bal)}</strong></span>
                           <span>|</span>
-                          <span>Payments: <strong style={{ color: "#0f172a" }}>{s.payments.filter(p => p.term === currentTerm).length}</strong></span>
+                          <span>Total payments: <strong style={{ color: "#0f172a" }}>{s.payments.length}</strong></span>
                         </div>
                       </div>
                     )}
