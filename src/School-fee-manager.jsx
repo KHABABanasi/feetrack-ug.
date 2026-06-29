@@ -1056,10 +1056,18 @@ export default function App() {
   const markSubscriptionPaid = async (schoolId) => {
     const notice = paymentNotices.find(n => n.schoolId === schoolId && n.status === "pending");
     const sch = SCHOOLS_DATA[schoolId];
-    const plan = sch?.plan || "Starter";
+    const currentPlan = sch?.plan || "Starter";
     const billingCycle = sch?.billingCycle || "monthly";
     const customPrice = sch?.customPrice || null;
-    const billing = getBillingInfo(plan, billingCycle, customPrice);
+
+    // Auto-detect plan switch: if the amount paid matches a different plan's standard price, switch
+    let newPlan = currentPlan;
+    if (notice?.amount) {
+      const exactPlanMatch = Object.keys(PLANS).find(p => getBillingInfo(p, billingCycle).price === notice.amount);
+      if (exactPlanMatch && exactPlanMatch !== currentPlan) newPlan = exactPlanMatch;
+    }
+    const planSwitched = newPlan !== currentPlan;
+    const billing = getBillingInfo(newPlan, billingCycle, planSwitched ? null : customPrice);
     const today = new Date();
     const nextDue = new Date();
     nextDue.setDate(nextDue.getDate() + billing.cycleDays);
@@ -1073,6 +1081,8 @@ export default function App() {
         action: "confirm",
         last_payment_date: lastPaymentDate,
         next_billing_date: nextBillingDate,
+        new_plan: newPlan,
+        plan_switched: planSwitched,
       },
     });
     if (error || !data?.success) return notify(`Could not confirm payment: ${error?.message || "Unknown error"}`, "err");
@@ -1080,18 +1090,21 @@ export default function App() {
     if (SCHOOLS_DATA[schoolId]) {
       SCHOOLS_DATA[schoolId] = {
         ...SCHOOLS_DATA[schoolId],
+        plan: newPlan,
         subscriptionStatus: "Active",
         lastPaymentDate,
         nextBillingDate,
         isTrial: false,
         paymentNoticeFreeze: false,
+        ...(planSwitched ? { customPrice: null, customPriceNote: "" } : {}),
       };
     }
     setSubscriptionRefresh(r => r + 1);
     setPaymentNotices(prev => prev.map(n => n.schoolId === schoolId && n.status === "pending" ? { ...n, status: "confirmed" } : n));
     const schoolName = sch?.name || notice?.schoolName || "School";
-    logActivity("Payment Confirmed", `${schoolName} marked as paid — next due ${fmtDate(nextBillingDate)}`);
-    notify(`✓ ${schoolName} marked as paid — next billing date ${fmtDate(nextBillingDate)}`);
+    const planMsg = planSwitched ? ` (upgraded to ${newPlan})` : "";
+    logActivity("Payment Confirmed", `${schoolName} marked as paid${planMsg} — next due ${fmtDate(nextBillingDate)}`);
+    notify(`✓ ${schoolName} marked as paid${planMsg} — next billing date ${fmtDate(nextBillingDate)}`);
   };
 
   // Manual plan change by Super Admin. Clears any custom negotiated price, since a
