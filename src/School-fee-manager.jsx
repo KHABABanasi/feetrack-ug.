@@ -449,6 +449,8 @@ export default function App() {
   const [selectedStaffId, setSelectedStaffId] = useState(null);
   const [staffSearch, setStaffSearch] = useState("");
   const [staffPayTermFilter, setStaffPayTermFilter] = useState("current");
+  const [expenseSearch, setExpenseSearch] = useState("");
+  const [expenseTermFilter, setExpenseTermFilter] = useState("current");
 
   const [showReceipt, setShowReceipt] = useState(null);
   const [showRollover, setShowRollover] = useState(false);
@@ -5020,7 +5022,18 @@ export default function App() {
                 <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 800, color: "#0f172a" }}>Expense Tracker</div>
                 <div style={{ color: "#64748b", fontSize: 13 }}>{currentTerm} · Total: {fmt(totalExpensesAmt)}</div>
               </div>
-              {!isReadOnly && <button onClick={() => setShowAddExp(true)} style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: 9, padding: "9px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add Expense</button>}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input value={expenseSearch || ""} onChange={e => setExpenseSearch(e.target.value)}
+                  placeholder="🔍 Search description..."
+                  style={{ padding: "9px 14px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 13, outline: "none", background: "#fff", minWidth: 160 }} />
+                <select value={expenseTermFilter || "current"} onChange={e => setExpenseTermFilter(e.target.value)}
+                  style={{ padding: "9px 12px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 12, fontWeight: 600, outline: "none", background: "#fff", cursor: "pointer" }}>
+                  <option value="current">Current Term</option>
+                  <option value="all">All Terms</option>
+                  {[...new Set(expenses.map(e => e.term))].filter(t => t && t !== currentTerm).sort().reverse().map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                {!isReadOnly && <button onClick={() => setShowAddExp(true)} style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: 9, padding: "9px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>+ Add Expense</button>}
+              </div>
             </div>
 
             <div style={{ ...grid(2, 1), gap: 16, marginBottom: 18 }}>
@@ -5068,7 +5081,11 @@ export default function App() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr 1fr 1fr 0.5fr", gap: 4, padding: "10px 16px", background: "#f8fafc", borderBottom: "1px solid #e8edf3" }}>
                 {["Category", "Description", "Amount", "Date", "Paid By", ""].map(h => <div key={h} style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.3 }}>{h}</div>)}
               </div>
-              {expenses.filter(e => e.term === currentTerm).map((e, i) => (
+              {expenses.filter(e => {
+                const termMatch = expenseTermFilter === "all" ? true : expenseTermFilter === "current" ? e.term === currentTerm : e.term === expenseTermFilter;
+                const searchMatch = !expenseSearch || e.description.toLowerCase().includes(expenseSearch.toLowerCase()) || e.category.toLowerCase().includes(expenseSearch.toLowerCase());
+                return termMatch && searchMatch;
+              }).map((e, i) => (
                 <div key={e.id} style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr 1fr 1fr 0.5fr", gap: 4, alignItems: "center", padding: "11px 16px", borderTop: "1px solid #f1f5f9", background: i % 2 === 0 ? "#fff" : "#fafbfc" }}>
                   <div><Pill text={e.category} bg="#fef3c7" col="#92400e" /></div>
                   <div style={{ fontSize: 13, color: "#374151" }}>{e.description}</div>
@@ -5093,7 +5110,11 @@ export default function App() {
                   </div>
                 </div>
               ))}
-              {expenses.filter(e => e.term === currentTerm).length === 0 && <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>No expenses for {currentTerm}</div>}
+              {expenses.filter(e => {
+                const termMatch = expenseTermFilter === "all" ? true : expenseTermFilter === "current" ? e.term === currentTerm : e.term === expenseTermFilter;
+                const searchMatch = !expenseSearch || e.description.toLowerCase().includes(expenseSearch.toLowerCase()) || e.category.toLowerCase().includes(expenseSearch.toLowerCase());
+                return termMatch && searchMatch;
+              }).length === 0 && <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>No expenses found{expenseSearch ? ` for "${expenseSearch}"` : ` for ${currentTerm}`}</div>}
             </div>
             </div>
             </div>
