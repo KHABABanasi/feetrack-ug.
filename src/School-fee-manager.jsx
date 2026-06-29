@@ -1165,7 +1165,7 @@ export default function App() {
 
   // Auto-upgrade a school's plan if their enrolled student count now exceeds their current plan's limit.
   // Never downgrades automatically — only upgrades when a real limit is crossed.
-  const checkAutoUpgrade = (schoolId, newStudentCount) => {
+  const checkAutoUpgrade = async (schoolId, newStudentCount) => {
     const sch = SCHOOLS_DATA[schoolId];
     if (!sch) return;
     const required = minPlanForCount(newStudentCount);
@@ -1173,6 +1173,9 @@ export default function App() {
       SCHOOLS_DATA[schoolId] = { ...sch, plan: required };
       setSubscriptionRefresh(r => r + 1);
       const billing = getBillingInfo(required, sch.billingCycle);
+      // Persist the plan change to Supabase
+      const { error } = await supabase.from("schools").update({ plan: required }).eq("id", schoolId);
+      if (error) console.error("Could not persist auto-upgrade for", sch.name, error.message);
       logActivity("Auto-Upgrade", `${sch.name}: ${sch.plan} → ${required} (${newStudentCount} students exceeded ${sch.plan} limit of ${PLANS[sch.plan].maxStudents})`);
       notify(`📈 ${sch.name} automatically upgraded to ${required} plan (${fmt(billing.price)}${billing.periodLabel}) — now has ${newStudentCount} students, exceeding the ${sch.plan} limit of ${PLANS[sch.plan].maxStudents}`);
     }
