@@ -3669,27 +3669,23 @@ export default function App() {
               </div>
             )}
 
-            {/* Recently Rejected Payment Notices */}
-            {paymentNotices.filter(n => n.status === "not_found").length > 0 && (
-              <div style={{ ...card, marginBottom: 20, border: "1px solid #fca5a5", background: "#fef2f2" }}>
-                <div style={{ fontWeight: 800, fontSize: 14, color: "#b91c1c", marginBottom: 4 }}>✗ Payment Not Found — School Notified</div>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>These schools' protection has been removed. Their normal grace period / suspension countdown resumed from where it left off.</div>
-                {paymentNotices.filter(n => n.status === "not_found").map(n => (
-                  <div key={n.id} style={{ fontSize: 12, color: "#374151", padding: "6px 0", borderTop: "1px solid #fecaca" }}>
-                    {n.schoolName} · {n.method} · {fmt(n.amount)} · {fmtDate(n.date)} · Ref: {n.billingRef}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Confirmed Payment Notices */}
-            {paymentNotices.filter(n => n.status === "confirmed").length > 0 && (
-              <div style={{ ...card, marginBottom: 20, border: "1px solid #86efac", background: "#f0fdf4" }}>
-                <div style={{ fontWeight: 800, fontSize: 14, color: "#15803d", marginBottom: 4 }}>✓ Confirmed Payments</div>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>These payment notices have been confirmed and the schools' subscriptions renewed.</div>
-                {paymentNotices.filter(n => n.status === "confirmed").map(n => (
-                  <div key={n.id} style={{ fontSize: 12, color: "#374151", padding: "6px 0", borderTop: "1px solid #bbf7d0" }}>
-                    ✓ {n.schoolName} · {n.method} · {fmt(n.amount)} · {fmtDate(n.date)} · Ref: {n.billingRef}
+            {/* Payment Notice History */}
+            {paymentNotices.filter(n => n.status !== "pending").length > 0 && (
+              <div style={{ ...card, marginBottom: 20 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: "#0f172a", marginBottom: 12 }}>📋 Payment Notice History</div>
+                {paymentNotices.filter(n => n.status !== "pending").map(n => (
+                  <div key={n.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderTop: "1px solid #f1f5f9", fontSize: 12 }}>
+                    <div>
+                      <span style={{ fontWeight: 700, color: "#0f172a" }}>{n.schoolName}</span>
+                      <span style={{ color: "#64748b", marginLeft: 8 }}>{n.method} · {fmt(n.amount)} · {fmtDate(n.date)}</span>
+                    </div>
+                    <span style={{
+                      padding: "3px 10px", borderRadius: 99, fontWeight: 700, fontSize: 11,
+                      background: n.status === "confirmed" ? "#d1fae5" : "#fee2e2",
+                      color: n.status === "confirmed" ? "#065f46" : "#b91c1c",
+                    }}>
+                      {n.status === "confirmed" ? "✓ Confirmed" : "✗ Not Found"}
+                    </span>
                   </div>
                 ))}
               </div>
