@@ -408,6 +408,7 @@ export default function App() {
   const [sendSMS, setSendSMS] = useState(true);
 
   const [showAdd, setShowAdd] = useState(false);
+  const [newStudentPhoto, setNewStudentPhoto] = useState(null);
   const [newS, setNewS] = useState({ name: "", class: "S1", stream: "", gender: "M", category: "Day Scholar", parent: "", phone: "", bursary: null, customFee: "" });
   const [returningMatch, setReturningMatch] = useState(null); // matched alumni record
   const [confirmReturning, setConfirmReturning] = useState(false);
@@ -440,6 +441,7 @@ export default function App() {
   const [showAddExp, setShowAddExp] = useState(false);
   const [newExp, setNewExp] = useState({ category: "Salaries", description: "", amount: "", date: new Date().toISOString().split("T")[0] });
   const [showAddStaff, setShowAddStaff] = useState(false);
+  const [newStaffPhoto, setNewStaffPhoto] = useState(null);
   const [showCustomPriceEdit, setShowCustomPriceEdit] = useState(null); // school being given a custom price
   const [customPriceForm, setCustomPriceForm] = useState({ price: "", note: "" });
   const [newStaff, setNewStaff] = useState({ name: "", role: "", phone: "", defaultRate: "", defaultRateType: "daily" });
@@ -2434,11 +2436,31 @@ export default function App() {
       arrears: 0, payments: [],
       bursary: null,
       customFee: newS.customFee ? parseInt(newS.customFee) : null,
+      photo: null,
     };
+
+    // Upload photo if one was selected
+    if (newStudentPhoto) {
+      try {
+        const blob = await (await fetch(newStudentPhoto)).blob();
+        const ext = blob.type === "image/png" ? "png" : "jpg";
+        const path = `students-${insertedRow.id}-${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage.from("photos").upload(path, blob, { contentType: blob.type, upsert: true });
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage.from("photos").getPublicUrl(path);
+          await supabase.from("students").update({ photo_url: urlData.publicUrl }).eq("id", insertedRow.id);
+          s.photo = urlData.publicUrl;
+        }
+      } catch (err) {
+        console.error("Could not upload student photo:", err);
+      }
+    }
+
     setAllStudents(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), s] }));
     checkAutoUpgrade(activeSchoolId, students.length + 1);
     notify(`${newS.name} enrolled — ${fmt(getStudentFee(s))}/term`);
     setShowAdd(false);
+    setNewStudentPhoto(null);
     setNewS({ name: "", class: schoolClasses[0], stream: "", gender: "M", category: "Day Scholar", parent: "", phone: "", bursary: null, customFee: "" });
     setReturningMatch(null);
     setConfirmReturning(false);
@@ -2969,9 +2991,28 @@ export default function App() {
       defaultRateType: inserted.default_rate_type || "daily",
       active: true, photo: null,
     };
+
+    // Upload photo if selected
+    if (newStaffPhoto) {
+      try {
+        const blob = await (await fetch(newStaffPhoto)).blob();
+        const ext = blob.type === "image/png" ? "png" : "jpg";
+        const path = `staff-${inserted.id}-${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage.from("photos").upload(path, blob, { contentType: blob.type, upsert: true });
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage.from("photos").getPublicUrl(path);
+          await supabase.from("staff").update({ photo_url: urlData.publicUrl }).eq("id", inserted.id);
+          st.photo = urlData.publicUrl;
+        }
+      } catch (err) {
+        console.error("Could not upload staff photo:", err);
+      }
+    }
+
     setAllStaff(prev => ({ ...prev, [activeSchoolId]: [...(prev[activeSchoolId] || []), st] }));
     notify(`${st.name} added to staff`);
     setShowAddStaff(false);
+    setNewStaffPhoto(null);
     setNewStaff({ name: "", role: "", phone: "", defaultRate: "", defaultRateType: "daily" });
   };
 
@@ -4867,8 +4908,8 @@ export default function App() {
                           }
                           <button onClick={e => { e.stopPropagation(); setShowPhotoUpload(s); setPhotoUploadType("student"); setCameraActive(false); }}
                             title="Add / change photo"
-                            style={{ position: "absolute", bottom: -4, right: -4, width: 16, height: 16, borderRadius: "50%", background: "#f59e0b", border: "2px solid #fff", cursor: "pointer", fontSize: 8, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#0f172a" }}>
-                            📷
+                            style={{ position: "absolute", bottom: -4, right: -4, width: 16, height: 16, borderRadius: "50%", background: "#f59e0b", border: "2px solid #fff", cursor: "pointer", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#0f172a" }}>
+                            +
                           </button>
                         </div>
                         <div>
@@ -7564,6 +7605,21 @@ export default function App() {
           <div style={{ background: "#fff", borderRadius: 18, padding: isMobile ? 18 : 30, width: isMobile ? "calc(100vw - 32px)" : 460, maxWidth: 460, boxShadow: "0 24px 60px rgba(0,0,0,0.2)", maxHeight: "90vh", overflowY: "auto" }}>
             <div style={{ fontSize: 17, fontWeight: 800, color: "#0f172a", marginBottom: 20 }}>Enrol New Student</div>
 
+            {/* Photo picker */}
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 18 }}>
+              <div onClick={() => { if (!newStudentPhoto) { const input = document.createElement("input"); input.type = "file"; input.accept = "image/*"; input.onchange = e => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => setNewStudentPhoto(ev.target.result); reader.readAsDataURL(file); }; input.click(); } }}
+                style={{ width: 64, height: 64, borderRadius: 14, background: newStudentPhoto ? "transparent" : "#f1f5f9", border: `2px dashed ${newStudentPhoto ? "#10b981" : "#e2e8f0"}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden", flexShrink: 0 }}>
+                {newStudentPhoto
+                  ? <img src={newStudentPhoto} alt="preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <span style={{ fontSize: 24 }}>+</span>}
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: "#374151" }}>Student Photo <span style={{ fontWeight: 400, color: "#94a3b8" }}>(optional)</span></div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Click to upload from gallery</div>
+                {newStudentPhoto && <button onClick={() => setNewStudentPhoto(null)} style={{ marginTop: 4, fontSize: 11, color: "#ef4444", background: "none", border: "none", cursor: "pointer", padding: 0 }}>✕ Remove</button>}
+              </div>
+            </div>
+
             <div style={{ marginBottom: 13 }}>
               <label style={lbl}>Full Name *</label>
               <input value={newS.name || ""} onChange={e => { setNewS({ ...newS, name: e.target.value }); checkReturningStudent(e.target.value); }} placeholder="e.g. Nakato Sarah" style={inp} />
@@ -7631,12 +7687,12 @@ export default function App() {
               <label style={lbl}>Custom Fee Override (optional)</label>
               <input type="number" value={newS.customFee} onChange={e => setNewS({ ...newS, customFee: e.target.value })} placeholder="Leave blank to use category fee" style={inp} />
               <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
-                {newS.category} {newS.class} base fee: <strong>{fmt(Object.values((FEE_STRUCTURE[newS.category] || FEE_STRUCTURE["Day Scholar"])[newS.class] || {}).reduce((a, b) => a + b, 0))}</strong>
+                {newS.category} {newS.class} base fee: <strong>{fmt(Object.values((feeStructure[newS.category] || feeStructure["Day Scholar"])[newS.class] || {}).reduce((a, b) => a + b, 0))}</strong>
                 {newS.customFee && <span style={{ color: "#7c3aed", marginLeft: 6 }}>→ Custom: <strong>{fmt(parseInt(newS.customFee))}</strong></span>}
               </div>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => { setShowAdd(false); setReturningMatch(null); setConfirmReturning(false); }} style={{ flex: 1, padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>Cancel</button>
+              <button onClick={() => { setShowAdd(false); setNewStudentPhoto(null); setReturningMatch(null); setConfirmReturning(false); }} style={{ flex: 1, padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>Cancel</button>
               <button onClick={handleAddStudent} style={{ flex: 1, padding: 11, borderRadius: 9, border: "none", background: confirmReturning ? "#7c3aed" : "#f59e0b", color: confirmReturning ? "#fff" : "#0f172a", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
                 {confirmReturning ? "🎓 Re-enrol Returning Student" : "Enrol Student"}
               </button>
@@ -7779,6 +7835,21 @@ export default function App() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }}>
           <div style={{ background: "#fff", borderRadius: 18, padding: isMobile ? 18 : 30, width: isMobile ? "calc(100vw - 32px)" : 400, maxWidth: 400, boxShadow: "0 24px 60px rgba(0,0,0,0.2)" }}>
             <div style={{ fontSize: 17, fontWeight: 800, color: "#0f172a", marginBottom: 20 }}>👷 Add Worker</div>
+
+            {/* Photo picker */}
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 18 }}>
+              <div onClick={() => { if (!newStaffPhoto) { const input = document.createElement("input"); input.type = "file"; input.accept = "image/*"; input.onchange = e => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => setNewStaffPhoto(ev.target.result); reader.readAsDataURL(file); }; input.click(); } }}
+                style={{ width: 64, height: 64, borderRadius: 14, background: newStaffPhoto ? "transparent" : "#f1f5f9", border: `2px dashed ${newStaffPhoto ? "#10b981" : "#e2e8f0"}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden", flexShrink: 0 }}>
+                {newStaffPhoto
+                  ? <img src={newStaffPhoto} alt="preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <span style={{ fontSize: 24 }}>+</span>}
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: "#374151" }}>Photo <span style={{ fontWeight: 400, color: "#94a3b8" }}>(optional)</span></div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Click to upload from gallery</div>
+                {newStaffPhoto && <button onClick={() => setNewStaffPhoto(null)} style={{ marginTop: 4, fontSize: 11, color: "#ef4444", background: "none", border: "none", cursor: "pointer", padding: 0 }}>✕ Remove</button>}
+              </div>
+            </div>
             <div style={{ marginBottom: 13 }}><label style={lbl}>Full Name</label>
               <input value={newStaff.name} onChange={e => setNewStaff({ ...newStaff, name: e.target.value })} placeholder="e.g. Nakato Betty" style={inp} /></div>
             <div style={{ marginBottom: 13 }}><label style={lbl}>Role</label>
@@ -7796,7 +7867,7 @@ export default function App() {
             </div>
             <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 16 }}>This is just a reference to speed up recording payments later — you can always pay a different amount or frequency.</div>
             <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setShowAddStaff(false)} style={{ flex: 1, padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>Cancel</button>
+              <button onClick={() => { setShowAddStaff(false); setNewStaffPhoto(null); }} style={{ flex: 1, padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>Cancel</button>
               <button onClick={handleAddStaff} style={{ flex: 1, padding: 11, borderRadius: 9, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Add Worker</button>
             </div>
           </div>
