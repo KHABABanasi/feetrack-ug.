@@ -3497,6 +3497,21 @@ export default function App() {
           </div>
         )}
 
+        {confirmDialog && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 16 }}>
+            <div style={{ background: "#fff", borderRadius: 16, padding: 26, width: 400, maxWidth: "calc(100vw - 32px)", boxShadow: "0 24px 60px rgba(0,0,0,0.25)" }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>{confirmDialog.title}</div>
+              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 22, lineHeight: 1.6 }}>{confirmDialog.message}</div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setConfirmDialog(null)} style={{ flex: 1, padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>Cancel</button>
+                <button onClick={async () => { const fn = confirmDialog.onConfirm; setConfirmDialog(null); await fn(); }} style={{ flex: 1, padding: 11, borderRadius: 9, border: "none", background: confirmDialog.danger ? "#ef4444" : "#0f172a", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
+                  {confirmDialog.danger ? "Yes, Continue" : "Confirm"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={{ background: "#0f172a", padding: "16px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 24 }}>👑</span>
@@ -4019,8 +4034,9 @@ export default function App() {
               </div>
             </div>
           </div>
-          );
-        })()}
+
+        );
+      })()}
       </div>
     );
   }
