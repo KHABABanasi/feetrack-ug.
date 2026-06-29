@@ -1060,7 +1060,8 @@ export default function App() {
       title: "Reject Signup Request",
       message: `Reject ${school ? `"${school.schoolName}"'s` : "this school's"} signup request? They will not be notified automatically.`,
       danger: true,
-      onConfirm: () => {
+      onConfirm: async () => {
+        await supabase.from("pending_signups").update({ status: "rejected" }).eq("id", id);
         setPendingSchools(prev => prev.map(p => p.id === id ? { ...p, status: "rejected" } : p));
         logActivity("Signup Rejected", school ? school.schoolName : id);
         notify("School signup rejected");
