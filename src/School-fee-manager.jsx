@@ -3657,7 +3657,12 @@ export default function App() {
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       <button onClick={() => markSubscriptionPaid(n.schoolId)} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 9, padding: "8px 14px", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>✓ Confirm (+{getBillingInfo(SCHOOLS_DATA[n.schoolId]?.plan, SCHOOLS_DATA[n.schoolId]?.billingCycle, SCHOOLS_DATA[n.schoolId]?.customPrice).cycleDays} days)</button>
-                      <button onClick={() => rejectPaymentNotice(n.id)} style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 9, padding: "8px 14px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✗ Not Received</button>
+                      <button onClick={() => setConfirmDialog({
+                        title: "Payment Not Received",
+                        message: `Confirm payment from ${n.schoolName} was NOT received? This removes their protection and resumes normal grace period / suspension rules.`,
+                        danger: true,
+                        onConfirm: () => rejectPaymentNotice(n.id),
+                      })} style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 9, padding: "8px 14px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✗ Not Received</button>
                     </div>
                   </div>
                 ))}
@@ -6245,7 +6250,7 @@ export default function App() {
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => setConfirmDialog(null)}
                 style={{ flex: 1, padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>Cancel</button>
-              <button onClick={() => { const fn = confirmDialog.onConfirm; setConfirmDialog(null); fn(); }}
+              <button onClick={async () => { const fn = confirmDialog.onConfirm; setConfirmDialog(null); await fn(); }}
                 style={{ flex: 1, padding: 11, borderRadius: 9, border: "none", background: confirmDialog.danger ? "#dc2626" : "#0f172a", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
                 {confirmDialog.danger ? "Yes, Continue" : "Confirm"}
               </button>
