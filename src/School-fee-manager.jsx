@@ -4559,7 +4559,7 @@ export default function App() {
                           <span style={{ fontWeight: 700, color: r.color }}>{r.count}</span>
                         </div>
                         <div style={{ height: 5, background: "#f1f5f9", borderRadius: 99 }}>
-                          <div style={{ height: "100%", width: `${Math.round((r.count / termStudents.length) * 100)}%`, background: r.color, borderRadius: 99 }} />
+                          <div style={{ height: "100%", width: `${termStudents.length > 0 ? Math.round((r.count / termStudents.length) * 100) : 0}%`, background: r.color, borderRadius: 99 }} />
                         </div>
                       </div>
                     ))}
