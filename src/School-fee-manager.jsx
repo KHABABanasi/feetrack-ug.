@@ -851,20 +851,21 @@ export default function App() {
   };
 
   // ── Add / Remove Fee Structure Line Items ──────────────────────
-  const handleAddFeeItem = () => {
+  const handleAddFeeItem = async () => {
     if (isReadOnly) return notify("Account is in read-only mode. Please renew your subscription to make changes.", "err");
     const name = newFeeItemName.trim().toLowerCase().replace(/\s+/g, "_");
     const amt = parseInt(newFeeItemAmt);
     if (!newFeeItemName.trim() || !amt || amt < 0) return notify("Enter a valid item name and amount", "err");
     const cat = showAddFeeItem;
+    let updated;
     setFeeStructure(prev => {
-      const updated = { ...prev, [cat]: { ...prev[cat] } };
+      updated = { ...prev, [cat]: { ...prev[cat] } };
       schoolClasses.forEach(cls => {
         updated[cat][cls] = { ...updated[cat][cls], [name]: amt };
       });
-      saveSchoolConfig(updated, requirements);
       return updated;
     });
+    await saveSchoolConfig(updated, requirements);
     notify(`"${newFeeItemName}" added to ${cat} fee structure (${fmt(amt)} for all classes)`);
     setShowAddFeeItem(null);
     setNewFeeItemName("");
@@ -877,16 +878,17 @@ export default function App() {
       title: "Remove Fee Item",
       message: `Remove "${field}" from ${cat} fee structure for all classes?`,
       danger: true,
-      onConfirm: () => {
+      onConfirm: async () => {
+        let updated;
         setFeeStructure(prev => {
-          const updated = { ...prev, [cat]: {} };
+          updated = { ...prev, [cat]: {} };
           schoolClasses.forEach(cls => {
             const { [field]: removed, ...rest } = prev[cat][cls] || {};
             updated[cat][cls] = rest;
           });
-          saveSchoolConfig(updated, requirements);
           return updated;
         });
+        await saveSchoolConfig(updated, requirements);
         notify(`"${field}" removed from ${cat} fee structure`);
       },
     });
