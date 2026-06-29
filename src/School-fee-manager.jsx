@@ -448,6 +448,7 @@ export default function App() {
   const [payStaffForm, setPayStaffForm] = useState({ amount: "", payType: "daily", periodLabel: "" });
   const [selectedStaffId, setSelectedStaffId] = useState(null);
   const [staffSearch, setStaffSearch] = useState("");
+  const [staffPayTermFilter, setStaffPayTermFilter] = useState("current");
 
   const [showReceipt, setShowReceipt] = useState(null);
   const [showRollover, setShowRollover] = useState(false);
@@ -5116,10 +5117,12 @@ export default function App() {
           const selectedStaff = selectedStaffId ? staff.find(s => s.id === selectedStaffId) : null;
           if (selectedStaff) {
             const allPaymentsForStaff = staffPayments.filter(p => p.staffId === selectedStaff.id).sort((a, b) => new Date(b.date) - new Date(a.date));
-            const dailyPayments = allPaymentsForStaff.filter(p => p.payType === "daily");
-            const monthlyPayments = allPaymentsForStaff.filter(p => p.payType === "monthly");
+            const termFilteredPayments = allPaymentsForStaff.filter(p => staffPayTermFilter === "all" || (staffPayTermFilter === "current" ? p.term === currentTerm : p.term === staffPayTermFilter));
+            const dailyPayments = termFilteredPayments.filter(p => p.payType === "daily");
+            const monthlyPayments = termFilteredPayments.filter(p => p.payType === "monthly");
             const dailyTotal = dailyPayments.reduce((a, p) => a + p.amount, 0);
             const monthlyTotal = monthlyPayments.reduce((a, p) => a + p.amount, 0);
+            const allTerms = [...new Set(allPaymentsForStaff.map(p => p.term))].sort().reverse();
             const paymentRow = (p) => (
               <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 16px", borderTop: "1px solid #f1f5f9" }}>
                 <div>
@@ -5143,6 +5146,18 @@ export default function App() {
             return (
               <div>
                 <button onClick={() => setSelectedStaffId(null)} style={{ background: "none", border: "none", color: "#64748b", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 16, padding: 0 }}>← Back to Staff & Wages</button>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, color: "#64748b" }}>
+                    {termFilteredPayments.length} payment(s) · {fmt(dailyTotal + monthlyTotal)} total
+                  </div>
+                  <select value={staffPayTermFilter} onChange={e => setStaffPayTermFilter(e.target.value)}
+                    style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 12, fontWeight: 600, outline: "none", background: "#fff", cursor: "pointer" }}>
+                    <option value="current">Current Term ({currentTerm})</option>
+                    <option value="all">All Terms</option>
+                    {allTerms.filter(t => t !== currentTerm).map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
 
                 <div style={{ ...card, marginBottom: 18, display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", alignItems: isMobile ? "stretch" : "center", gap: 14 }}>
                   <div>
