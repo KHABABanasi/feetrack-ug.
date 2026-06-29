@@ -4242,6 +4242,7 @@ export default function App() {
     { id: "payments", icon: "◈", label: "Payments" },
     { id: "expenses", icon: "◇", label: "Expenses" },
     { id: "staff", icon: "👷", label: "Staff & Wages" },
+    { id: "notifications", icon: "🔔", label: "Notifications" },
     { id: "reports", icon: "▤", label: "Reports" },
     { id: "alumni", icon: "🎓", label: "Alumni / Leavers" },
   ];
@@ -4342,7 +4343,7 @@ export default function App() {
           {NAV_MAIN.map(item => (
             <button key={item.id} onClick={() => { setTab(item.id); setSelectedStaffId(null); if (isMobile) setMobileSidebarOpen(false); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", borderRadius: 9, border: item.highlight && tab !== item.id ? "1px solid #f87171" : "none", cursor: "pointer", marginBottom: 2, textAlign: "left", fontSize: 13, fontWeight: tab === item.id ? 700 : (item.highlight ? 700 : 500), background: tab === item.id ? "#f59e0b" : item.highlight ? "#450a0a" : "transparent", color: tab === item.id ? "#0f172a" : item.highlight ? "#fca5a5" : "#64748b" }}>
               <span style={{ fontSize: 10 }}>{item.icon}</span>{item.label}
-              {item.id === "sms" && smsLog.length > 0 && <span style={{ marginLeft: "auto", background: "#ef4444", color: "#fff", borderRadius: 99, fontSize: 9, fontWeight: 700, padding: "1px 6px" }}>{smsLog.length}</span>}
+              {item.id === "notifications" && schoolNotifications.filter(n => !n.read).length > 0 && <span style={{ marginLeft: "auto", background: "#ef4444", color: "#fff", borderRadius: 99, fontSize: 9, fontWeight: 700, padding: "1px 6px" }}>{schoolNotifications.filter(n => !n.read).length}</span>}
             </button>
           ))}
 
@@ -5311,6 +5312,62 @@ export default function App() {
         })()}
 
         {/* ════════ SMS LOG ════════ */}
+        {/* ════════ NOTIFICATIONS ════════ */}
+        {tab === "notifications" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 800, color: "#0f172a" }}>🔔 Notifications</div>
+                <div style={{ color: "#64748b", fontSize: 13 }}>
+                  {schoolNotifications.filter(n => !n.read).length} unread · {schoolNotifications.length} total
+                </div>
+              </div>
+              {schoolNotifications.some(n => !n.read) && (
+                <button onClick={async () => {
+                  await supabase.from("notifications").update({ read: true }).eq("school_id", activeSchoolId);
+                  setSchoolNotifications(prev => prev.map(n => ({ ...n, read: true })));
+                  notify("All notifications marked as read");
+                }} style={{ background: "#f1f5f9", color: "#374151", border: "1px solid #e2e8f0", borderRadius: 9, padding: "9px 16px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                  ✓ Mark all as read
+                </button>
+              )}
+            </div>
+
+            {schoolNotifications.length === 0 ? (
+              <div style={{ ...card, textAlign: "center", padding: 60 }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>🔔</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>No notifications yet</div>
+                <div style={{ fontSize: 13, color: "#64748b" }}>Subscription alerts, payment confirmations and plan changes will appear here</div>
+              </div>
+            ) : (
+              <div style={{ ...card, padding: 0, overflow: "hidden" }}>
+                {schoolNotifications.map((n, i) => (
+                  <div key={n.id} onClick={async () => {
+                    if (!n.read) {
+                      await supabase.from("notifications").update({ read: true }).eq("id", n.id);
+                      setSchoolNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                    }
+                  }} style={{ padding: "16px 20px", borderTop: i > 0 ? "1px solid #f1f5f9" : "none", background: n.read ? "#fff" : "#eff6ff", cursor: n.read ? "default" : "pointer" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        <span style={{ fontSize: 20 }}>
+                          {n.type === "plan_upgraded" ? "📈" : n.type === "payment_confirmed" ? "✅" : n.type === "payment_rejected" ? "❌" : n.type === "subscription_expiring" ? "⚠️" : n.type === "account_suspended" ? "🔒" : "🔔"}
+                        </span>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>{n.title}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                        {!n.read && <span style={{ background: "#3b82f6", borderRadius: 99, width: 8, height: 8, display: "inline-block" }} />}
+                        <span style={{ fontSize: 11, color: "#94a3b8" }}>{new Date(n.createdAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{n.message}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ════════ REPORTS ════════ */}
         {tab === "reports" && (
           <div>
