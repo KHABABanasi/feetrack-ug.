@@ -387,6 +387,8 @@ export default function App() {
   const [allStaff, setAllStaff] = useState({});
   const [allStaffPayments, setAllStaffPayments] = useState({});
   const [smsLog, setSmsLog] = useState([]);
+  const [schoolNotifications, setSchoolNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   const [tab, setTab] = useState("dashboard");
   const [currentTerm, setCurrentTerm] = useState(() => {
@@ -955,6 +957,13 @@ export default function App() {
       status: "pending",
     };
     setPendingSchools(prev => [...prev, newPending]);
+    // Email super admin about the new signup
+    supabase.functions.invoke("send-notification", {
+      body: {
+        type: "new_signup", school_id: null, school_name: schoolName,
+        data: { school_type: schoolType, students, location, email },
+      },
+    });
     setSignupSubmitted(true);
   };
 
@@ -1103,6 +1112,13 @@ export default function App() {
     setPaymentNotices(prev => prev.map(n => n.schoolId === schoolId && n.status === "pending" ? { ...n, status: "confirmed" } : n));
     const schoolName = sch?.name || notice?.schoolName || "School";
     const planMsg = planSwitched ? ` (upgraded to ${newPlan})` : "";
+    // Notify school their payment was confirmed
+    supabase.functions.invoke("send-notification", {
+      body: {
+        type: "payment_confirmed", school_id: schoolId, school_name: schoolName,
+        data: { plan: newPlan, next_billing_date: fmtDate(nextBillingDate) },
+      },
+    });
     logActivity("Payment Confirmed", `${schoolName} marked as paid${planMsg} — next due ${fmtDate(nextBillingDate)}`);
     notify(`✓ ${schoolName} marked as paid${planMsg} — next billing date ${fmtDate(nextBillingDate)}`);
   };
@@ -1170,14 +1186,21 @@ export default function App() {
     if (!sch) return;
     const required = minPlanForCount(newStudentCount);
     if (PLAN_ORDER.indexOf(required) > PLAN_ORDER.indexOf(sch.plan)) {
+      const fromPlan = sch.plan;
       SCHOOLS_DATA[schoolId] = { ...sch, plan: required };
       setSubscriptionRefresh(r => r + 1);
       const billing = getBillingInfo(required, sch.billingCycle);
-      // Persist the plan change to Supabase
       const { error } = await supabase.from("schools").update({ plan: required }).eq("id", schoolId);
       if (error) console.error("Could not persist auto-upgrade for", sch.name, error.message);
-      logActivity("Auto-Upgrade", `${sch.name}: ${sch.plan} → ${required} (${newStudentCount} students exceeded ${sch.plan} limit of ${PLANS[sch.plan].maxStudents})`);
-      notify(`📈 ${sch.name} automatically upgraded to ${required} plan (${fmt(billing.price)}${billing.periodLabel}) — now has ${newStudentCount} students, exceeding the ${sch.plan} limit of ${PLANS[sch.plan].maxStudents}`);
+      // Notify school in-app and email super admin
+      supabase.functions.invoke("send-notification", {
+        body: {
+          type: "plan_upgraded", school_id: schoolId, school_name: sch.name,
+          data: { from_plan: fromPlan, to_plan: required, student_count: newStudentCount },
+        },
+      });
+      logActivity("Auto-Upgrade", `${sch.name}: ${fromPlan} → ${required} (${newStudentCount} students exceeded ${fromPlan} limit of ${PLANS[fromPlan].maxStudents})`);
+      notify(`📈 ${sch.name} automatically upgraded to ${required} plan (${fmt(billing.price)}${billing.periodLabel}) — now has ${newStudentCount} students, exceeding the ${fromPlan} limit of ${PLANS[fromPlan].maxStudents}`);
     }
   };
 
@@ -1197,6 +1220,13 @@ export default function App() {
       note: inserted.note, submittedAt: inserted.submitted_at, status: "pending",
     };
     setPaymentNotices(prev => [notice, ...prev]);
+    // Email super admin about the payment notice
+    supabase.functions.invoke("send-notification", {
+      body: {
+        type: "payment_notice_submitted", school_id: null, school_name: school.name,
+        data: { method: paymentConfirmForm.method, amount: amt, date: paymentConfirmForm.date, note: paymentConfirmForm.note, billing_ref: school.billingRef || "" },
+      },
+    });
     // Freeze countdown while notice is under review
     await supabase.from("schools").update({ payment_notice_freeze: true }).eq("id", activeSchoolId);
     SCHOOLS_DATA[activeSchoolId] = { ...SCHOOLS_DATA[activeSchoolId], paymentNoticeFreeze: true };
@@ -1219,6 +1249,13 @@ export default function App() {
       SCHOOLS_DATA[notice.schoolId] = { ...SCHOOLS_DATA[notice.schoolId], paymentNoticeFreeze: false };
     }
     setSubscriptionRefresh(r => r + 1);
+    // Notify school their payment was not found
+    supabase.functions.invoke("send-notification", {
+      body: {
+        type: "payment_rejected", school_id: notice.schoolId, school_name: notice.schoolName,
+        data: { billing_ref: notice.billingRef || "" },
+      },
+    });
     logActivity("Payment Notice Rejected", `${notice.schoolName} — ${fmt(notice.amount)} via ${notice.method} not found`);
     notify(`${notice.schoolName} notified — payment not found, protection removed`);
   };
@@ -1945,13 +1982,14 @@ export default function App() {
     // Use SECURITY DEFINER Postgres functions instead of direct table queries —
     // this works for both authenticated school admins AND unauthenticated parents
     // (who have no Supabase Auth session and would be blocked by RLS otherwise).
-    const [studentsResult, paymentsResult, staffResult, staffPaymentsResult, expensesResult, configResult, smsResult] = await Promise.all([
+    const [studentsResult, paymentsResult, staffResult, staffPaymentsResult, expensesResult, configResult, notificationsResult, smsResult] = await Promise.all([
       supabase.rpc("get_students_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_payments_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_staff_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_staff_payments_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_expenses_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_school_config", { p_school_id: schoolId }),
+      supabase.rpc("get_notifications_for_school", { p_school_id: schoolId }),
       supabase.rpc("get_sms_log_for_school", { p_school_id: schoolId }),
     ]);
     if (studentsResult.error) {
@@ -2057,6 +2095,14 @@ export default function App() {
       time: new Date(row.sent_at).toLocaleTimeString(),
     }));
     setSmsLog(loadedSmsLog);
+
+    // Load notifications
+    const loadedNotifications = (notificationsResult.data || []).filter(Boolean).map(row => ({
+      id: row.id, type: row.type, title: row.title,
+      message: row.message, read: row.read,
+      createdAt: row.created_at,
+    }));
+    setSchoolNotifications(loadedNotifications);
 
     setStudentsLoading(false);
   };
@@ -2195,6 +2241,18 @@ export default function App() {
       saveSession({ role: "admin", schoolId: newSchoolId });
       loadStudentsForSchool(newSchoolId);
       setSubscriptionRefresh(r => r + 1);
+      // Check subscription expiry — notify if within 3 days
+      if (fetchedSchool.next_billing_date) {
+        const daysRemaining = Math.ceil((new Date(fetchedSchool.next_billing_date) - new Date()) / (1000 * 60 * 60 * 24));
+        if (daysRemaining <= 3 && daysRemaining >= 0 && fetchedSchool.subscription_status === "Active") {
+          supabase.functions.invoke("send-notification", {
+            body: {
+              type: "subscription_expiring", school_id: newSchoolId, school_name: fetchedSchool.name,
+              data: { days_remaining: daysRemaining, expiry_date: fetchedSchool.next_billing_date, billing_ref: fetchedSchool.billing_ref || "" },
+            },
+          });
+        }
+      }
       return;
       // ── End Supabase Auth login ──────────────────────────────────
     } else {
@@ -4250,8 +4308,20 @@ export default function App() {
 
           {/* School identity — fixed, not switchable (privacy) */}
           <div style={{ background: "#1e293b", borderRadius: 8, padding: "8px 10px", marginBottom: 4 }}>
-            <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Your School</div>
-            <div style={{ color: "#f59e0b", fontSize: 12, fontWeight: 700, marginTop: 2 }}>{school.logo} {school.name}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Your School</div>
+                <div style={{ color: "#f59e0b", fontSize: 12, fontWeight: 700, marginTop: 2 }}>{school.logo} {school.name}</div>
+              </div>
+              {schoolNotifications.filter(n => !n.read).length > 0 && (
+                <button onClick={() => setShowNotifications(true)} style={{ position: "relative", background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+                  <span style={{ fontSize: 16 }}>🔔</span>
+                  <span style={{ position: "absolute", top: 0, right: 0, background: "#ef4444", color: "#fff", borderRadius: 99, fontSize: 9, fontWeight: 800, padding: "1px 4px", minWidth: 14, textAlign: "center" }}>
+                    {schoolNotifications.filter(n => !n.read).length}
+                  </span>
+                </button>
+              )}
+            </div>
             {subInfo.status !== "Active" && (
               <div style={{ marginTop: 4, fontSize: 10, fontWeight: 700, color: subInfo.frozen ? "#60a5fa" : subInfo.status === "Grace Period" ? "#fbbf24" : "#f87171" }}>
                 {subInfo.frozen ? "📨 Payment under review" : subInfo.status === "Grace Period" ? `⚠ Renew within ${subInfo.daysRemaining}d` : "🔒 Read-only — renew now"}
@@ -6265,6 +6335,47 @@ export default function App() {
               <button onClick={handleSaveEditStudent}
                 style={{ flex: 1, padding: 11, borderRadius: 9, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Save Changes</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ════════ NOTIFICATIONS PANEL ════════ */}
+      {showNotifications && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", display: "flex", alignItems: "flex-start", justifyContent: "flex-end", zIndex: 400, padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 16, width: 360, maxWidth: "calc(100vw - 32px)", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 24px 60px rgba(0,0,0,0.25)", marginTop: 60 }}>
+            <div style={{ padding: "16px 18px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: "#0f172a" }}>🔔 Notifications</div>
+              <button onClick={() => setShowNotifications(false)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#94a3b8" }}>✕</button>
+            </div>
+            {schoolNotifications.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No notifications yet</div>
+            ) : (
+              schoolNotifications.map((n, i) => (
+                <div key={n.id} onClick={async () => {
+                  if (!n.read) {
+                    await supabase.from("notifications").update({ read: true }).eq("id", n.id);
+                    setSchoolNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                  }
+                }} style={{ padding: "14px 18px", borderTop: i > 0 ? "1px solid #f1f5f9" : "none", cursor: "pointer", background: n.read ? "#fff" : "#eff6ff" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "#0f172a" }}>{n.title}</div>
+                    {!n.read && <span style={{ background: "#3b82f6", borderRadius: 99, width: 8, height: 8, display: "inline-block", marginTop: 4, flexShrink: 0 }} />}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>{n.message}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>{new Date(n.createdAt).toLocaleDateString()}</div>
+                </div>
+              ))
+            )}
+            {schoolNotifications.some(n => !n.read) && (
+              <div style={{ padding: "12px 18px", borderTop: "1px solid #f1f5f9" }}>
+                <button onClick={async () => {
+                  await supabase.from("notifications").update({ read: true }).eq("school_id", activeSchoolId);
+                  setSchoolNotifications(prev => prev.map(n => ({ ...n, read: true })));
+                }} style={{ width: "100%", padding: 10, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#64748b" }}>
+                  Mark all as read
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
