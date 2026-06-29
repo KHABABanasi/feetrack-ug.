@@ -451,6 +451,8 @@ export default function App() {
   const [staffPayTermFilter, setStaffPayTermFilter] = useState("current");
   const [expenseSearch, setExpenseSearch] = useState("");
   const [expenseTermFilter, setExpenseTermFilter] = useState("current");
+  const [reportsTerm, setReportsTerm] = useState(null);
+  const [alumniSearch, setAlumniSearch] = useState(""); // null = use currentTerm
 
   const [showReceipt, setShowReceipt] = useState(null);
   const [showRollover, setShowRollover] = useState(false);
@@ -1936,6 +1938,14 @@ export default function App() {
     const cls = termStudents.filter(s => s.class === c);
     const exp = cls.reduce((a, s) => a + getBalance(s, currentTerm).totalDue, 0);
     const col = cls.reduce((a, s) => a + totalPaid(s, currentTerm), 0);
+    return { class: c, count: cls.length, expected: exp, collected: col, rate: exp > 0 ? Math.round((col / exp) * 100) : 0 };
+  }).filter(g => g.count > 0);
+
+  const activeReportsTerm = reportsTerm || currentTerm;
+  const reportsClassStats = schoolClasses.map(c => {
+    const cls = students.filter(s => s.class === c);
+    const exp = cls.reduce((a, s) => a + getBalance(s, activeReportsTerm).totalDue, 0);
+    const col = cls.reduce((a, s) => a + totalPaid(s, activeReportsTerm), 0);
     return { class: c, count: cls.length, expected: exp, collected: col, rate: exp > 0 ? Math.round((col / exp) * 100) : 0 };
   }).filter(g => g.count > 0);
 
@@ -5412,12 +5422,18 @@ export default function App() {
                 <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a" }}>Financial Reports</div>
                 <div style={{ color: "#64748b", fontSize: 13 }}>{school.name} · {currentTerm}</div>
               </div>
-              <button onClick={exportExcel} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 9, padding: "9px 16px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>📊 Download Excel Report</button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <select value={reportsTerm || currentTerm} onChange={e => setReportsTerm(e.target.value)}
+                  style={{ padding: "9px 12px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 12, fontWeight: 600, outline: "none", background: "#fff", cursor: "pointer" }}>
+                  {TERMS.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <button onClick={exportExcel} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 9, padding: "9px 16px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>📊 Download Excel Report</button>
+              </div>
             </div>
             <div style={{ ...card, marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a", marginBottom: 14 }}>Expected vs Collected by Class</div>
               <ResponsiveContainer width="100%" height={210}>
-                <BarChart data={classStats}>
+                <BarChart data={reportsClassStats}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                   <XAxis dataKey="class" tick={{ fontSize: 12, fill: "#64748b" }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
@@ -5428,7 +5444,7 @@ export default function App() {
               </ResponsiveContainer>
             </div>
             <div style={{ ...grid(3, 1), gap: 14 }}>
-              {classStats.map(g => (
+              {reportsClassStats.map(g => (
                 <div key={g.class} style={{ ...card }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
                     <span style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>{g.class}</span>
@@ -6187,7 +6203,12 @@ export default function App() {
           return (
             <div>
               <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", marginBottom: 4 }}>Alumni & Leavers</div>
-              <div style={{ color: "#64748b", fontSize: 13, marginBottom: 20 }}>All historical records preserved — {alumni.length} total leavers from {school.name}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                <div style={{ color: "#64748b", fontSize: 13 }}>All historical records preserved — {alumni.length} total leavers from {school.name}</div>
+                <input value={alumniSearch || ""} onChange={e => setAlumniSearch(e.target.value)}
+                  placeholder="🔍 Search name or year..."
+                  style={{ padding: "9px 14px", borderRadius: 9, border: "1px solid #e2e8f0", fontSize: 13, outline: "none", background: "#fff", minWidth: 200 }} />
+              </div>
 
               {/* Summary cards */}
               <div style={{ ...grid(6, 2), gap: 14, marginBottom: 20 }}>
@@ -6259,7 +6280,7 @@ export default function App() {
                 ) : (
                 <div style={{ overflowX: "auto" }}>
                 <div style={{ minWidth: isMobile ? 800 : "auto" }}>
-                {alumni.map((a, i) => {
+                {alumni.filter(a => !alumniSearch || a.name.toLowerCase().includes(alumniSearch.toLowerCase()) || (a.leftYear || "").includes(alumniSearch) || (a.leftClass || "").toLowerCase().includes(alumniSearch.toLowerCase())).map((a, i) => {
                   const isOpen = expandedAlumni === a.id;
                   const totalPayments = (a.payments || []).reduce((acc, p) => acc + p.amount, 0);
                   return (
