@@ -711,6 +711,33 @@ export default function App() {
           status: row.status,
         })));
       }
+      // Load all schools for super admin dashboard (RLS-safe via SECURITY DEFINER RPC)
+      const { data: allSchools, error: schoolsError } = await supabase.rpc("get_all_schools_for_admin");
+      if (cancelled) return;
+      if (!schoolsError && allSchools) {
+        allSchools.forEach(row => {
+          // Only populate fields the super admin dashboard needs — don't overwrite
+          // a richer entry that might already exist from an active school login.
+          if (!SCHOOLS_DATA[row.id]) {
+            SCHOOLS_DATA[row.id] = {
+              id: row.id, userId: row.user_id || null,
+              name: row.name, location: row.location, principal: row.principal,
+              phone: row.phone, notifyEmail: row.notify_email || "", logo: row.logo || "🏫",
+              schoolType: row.school_type || "secondary",
+              adminUsername: row.admin_username, adminPassword: row.admin_password,
+              plan: row.plan || "Starter", billingCycle: row.billing_cycle || "monthly",
+              customPrice: row.custom_price, customPriceNote: row.custom_price_note || "",
+              subscriptionStatus: row.subscription_status || "Active",
+              isTrial: row.is_trial, trialActivated: row.trial_activated,
+              trialStartDate: row.trial_start_date, nextBillingDate: row.next_billing_date,
+              lastPaymentDate: row.last_payment_date,
+              paymentNoticeFreeze: row.payment_notice_freeze || false,
+              billingRef: row.billing_ref, setupComplete: row.setup_complete,
+            };
+          }
+        });
+        setSubscriptionRefresh(r => r + 1);
+      }
     }
     loadSuperAdminData();
     return () => { cancelled = true; };
