@@ -686,6 +686,22 @@ export default function App() {
   // through the real signup form and stored in Supabase.
   useEffect(() => {
     let cancelled = false;
+    async function loadSuperAdminSettings() {
+      const { data, error } = await supabase.rpc("get_super_admin_settings");
+      if (cancelled || error || !data || data.length === 0) return;
+      const row = data[0];
+      setSuperAdminCreds({ username: row.username, password: row.password, notifyEmail: row.notify_email || "" });
+      setPlatformPayInfo({
+        momoNumber: row.momo_number || "", momoName: row.momo_name || "",
+        bankName: row.bank_name || "", bankAccount: row.bank_account || "",
+      });
+    }
+    loadSuperAdminSettings();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     async function loadSuperAdminData() {
       // Load pending signups
       const { data: signups, error: signupsError } = await supabase.from("pending_signups").select("*").order("submitted_at", { ascending: false });
@@ -4068,11 +4084,18 @@ export default function App() {
                 <input type="password" value={superPwForm.confirmPw} onChange={e => { setSuperPwForm(p => ({ ...p, confirmPw: e.target.value })); setSuperPwError(""); }} style={inp} />
               </div>
               {superPwError && <div style={{ color: "#dc2626", fontSize: 12, fontWeight: 600, marginBottom: 12 }}>{superPwError}</div>}
-              <button onClick={() => {
-                if (superPwForm.currentPw !== superAdminCreds.password) return setSuperPwError("Current password is incorrect.");
-                if (!superPwForm.newPw || superPwForm.newPw.length < 6) return setSuperPwError("New password must be at least 6 characters.");
-                if (superPwForm.newPw !== superPwForm.confirmPw) return setSuperPwError("New passwords do not match.");
-                setSuperAdminCreds(prev => ({ ...prev, password: superPwForm.newPw, username: superPwForm.newUsername.trim() || prev.username }));
+              <button onClick={async () => {
+                if (!superPwForm.newPw && !superPwForm.newUsername.trim()) return setSuperPwError("Enter a new username or password to update.");
+                if (superPwForm.newPw && superPwForm.newPw.length < 6) return setSuperPwError("New password must be at least 6 characters.");
+                if (superPwForm.newPw && superPwForm.newPw !== superPwForm.confirmPw) return setSuperPwError("New passwords do not match.");
+                const { data, error } = await supabase.rpc("update_super_admin_credentials", {
+                  p_current_password: superPwForm.currentPw,
+                  p_new_username: superPwForm.newUsername.trim() || null,
+                  p_new_password: superPwForm.newPw || null,
+                });
+                if (error) return setSuperPwError(`Could not update: ${error.message}`);
+                if (!data) return setSuperPwError("Current password is incorrect.");
+                setSuperAdminCreds(prev => ({ ...prev, password: superPwForm.newPw || prev.password, username: superPwForm.newUsername.trim() || prev.username }));
                 setSuperPwForm({ currentPw: "", newPw: "", confirmPw: "", newUsername: "" });
                 notify("✓ Super admin login updated");
               }} style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 9, padding: "10px 20px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
@@ -4112,8 +4135,14 @@ export default function App() {
                 </div>
               </div>
 
-              <button onClick={() => {
-                if (platformPayForm) setPlatformPayInfo(platformPayForm);
+              <button onClick={async () => {
+                const updated = platformPayForm || platformPayInfo;
+                const { error } = await supabase.rpc("update_super_admin_settings", {
+                  p_momo_number: updated.momoNumber, p_momo_name: updated.momoName,
+                  p_bank_name: updated.bankName, p_bank_account: updated.bankAccount,
+                });
+                if (error) return notify(`Could not save: ${error.message}`, "err");
+                setPlatformPayInfo(updated);
                 setPlatformPayForm(null);
                 notify("✓ Payment details updated — schools will see the new details immediately");
               }} style={{ marginTop: 16, background: "#8b5cf6", color: "#fff", border: "none", borderRadius: 9, padding: "10px 20px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
@@ -4130,8 +4159,10 @@ export default function App() {
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <input value={notifyEmailInput} onChange={e => setNotifyEmailInput(e.target.value)}
                   placeholder={superAdminCreds.notifyEmail || "you@example.com"} style={{ ...inp, flex: "1 1 240px" }} />
-                <button onClick={() => {
+                <button onClick={async () => {
                   if (!notifyEmailInput.trim() || !notifyEmailInput.includes("@")) return notify("Enter a valid email address", "err");
+                  const { error } = await supabase.rpc("update_super_admin_settings", { p_notify_email: notifyEmailInput.trim() });
+                  if (error) return notify(`Could not save: ${error.message}`, "err");
                   setSuperAdminCreds(prev => ({ ...prev, notifyEmail: notifyEmailInput.trim() }));
                   notify("✓ Notification email saved");
                 }} style={{ background: "#8b5cf6", color: "#fff", border: "none", borderRadius: 9, padding: "10px 20px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
