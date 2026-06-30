@@ -504,6 +504,7 @@ export default function App() {
   const [signupForm, setSignupForm] = useState({ schoolName: "", location: "", principal: "", phone: "", email: "", students: "", schoolType: "secondary", billingCycle: "monthly", username: "", password: "", confirmPassword: "" });
   const [signupSubmitted, setSignupSubmitted] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [superAdminStudentCounts, setSuperAdminStudentCounts] = useState({});
   const [subscriptionRefresh, setSubscriptionRefresh] = useState(0); // bump to force re-render after SCHOOLS_DATA mutation
 
   // ── Load real schools from Supabase ────────────────────────────
@@ -736,6 +737,13 @@ export default function App() {
             };
           }
         });
+        // Load real student counts per school (for billing/plan display)
+        const { data: counts } = await supabase.rpc("get_student_counts_for_admin");
+        if (counts) {
+          const countMap = {};
+          counts.forEach(c => { countMap[c.school_id] = Number(c.student_count); });
+          setSuperAdminStudentCounts(countMap);
+        }
         setSubscriptionRefresh(r => r + 1);
       }
     }
@@ -3966,7 +3974,7 @@ export default function App() {
                         </div>
                         <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#374151", flexWrap: "wrap" }}>
                           <span>Plan: <strong>{s.plan}</strong> ({fmt(getBillingInfo(s.plan, s.billingCycle, s.customPrice).price)}{getBillingInfo(s.plan, s.billingCycle, s.customPrice).periodLabel}, {s.billingCycle === "term" ? "Per Term" : "Monthly"})</span>
-                          <span>Students: <strong>{(allStudents[s.id] || []).length}</strong> / {PLANS[s.plan]?.maxStudents === Infinity ? "∞" : PLANS[s.plan]?.maxStudents}</span>
+                          <span>Students: <strong>{superAdminStudentCounts[s.id] ?? (allStudents[s.id] || []).length}</strong> / {PLANS[s.plan]?.maxStudents === Infinity ? "∞" : PLANS[s.plan]?.maxStudents}</span>
                           {s.nextBillingDate
                             ? <span>Next due: <strong>{fmtDate(s.nextBillingDate)}</strong></span>
                             : <span style={{ color: "#2563eb", fontWeight: 700 }}>⏳ Trial not yet started — awaiting first login</span>}
