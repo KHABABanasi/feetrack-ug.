@@ -821,7 +821,12 @@ export default function App() {
   // pointless, since the real loading path was already handling this
   // correctly elsewhere.
 
-  // ── Browser history support — makes the back button navigate between tabs ──
+  // Register service worker for PWA support
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(err => console.log("SW registration failed:", err));
+    }
+  }, []);
   useEffect(() => {
     if (!currentUser || currentUser.role !== "admin") return;
     window.history.pushState({ tab }, "", window.location.pathname);
