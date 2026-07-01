@@ -762,6 +762,14 @@ export default function App() {
         }
         setSubscriptionRefresh(r => r + 1);
       }
+      // Load activity log
+      const { data: logData } = await supabase.rpc("get_activity_log");
+      if (cancelled) return;
+      if (logData) {
+        setActivityLog(logData.map(row => ({
+          id: row.id, action: row.action, detail: row.detail, at: row.logged_at,
+        })));
+      }
     }
     loadSuperAdminData();
     return () => { cancelled = true; };
@@ -865,7 +873,11 @@ export default function App() {
 
   // ── Super Admin Activity Log ─────────────────────────────────────
   const logActivity = (action, detail) => {
-    setActivityLog(prev => [{ id: `act-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, action, detail, at: new Date().toISOString() }, ...prev].slice(0, 200));
+    setActivityLog(prev => [{ id: `act-${Date.now()}`, action, detail, at: new Date().toISOString() }, ...prev].slice(0, 200));
+    // Persist to Supabase asynchronously — non-blocking
+    supabase.rpc("log_activity", { p_action: action, p_detail: detail }).then(({ error }) => {
+      if (error) console.error("Could not persist activity log:", error.message);
+    });
   };
 
   // ── Real SMS sender — calls send-sms Edge Function ────────────
