@@ -5118,9 +5118,7 @@ export default function App() {
                         <div style={{ position: "relative", flexShrink: 0 }}>
                           {s.photo
                             ? <img src={s.photo} alt={s.name} style={{ width: 38, height: 38, borderRadius: 10, objectFit: "cover", border: "2px solid #e2e8f0" }} />
-                            : <div style={{ width: 38, height: 38, borderRadius: 10, background: s.gender === "F" ? "#fce7f3" : "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, border: "2px solid #e2e8f0" }}>
-                                {s.gender === "F" ? <Avatar name={s.name} gender="F" size={28} /> : <Avatar name={s.name} gender="M" size={28} />}
-                              </div>
+                            : <Avatar name={s.name} gender={s.gender} size={38} photo={null} />
                           }
                           <button onClick={e => { e.stopPropagation(); setShowPhotoUpload(s); setPhotoUploadType("student"); setCameraActive(false); }}
                             title="Add / change photo"
@@ -5479,7 +5477,7 @@ export default function App() {
                       <div style={{ position: "relative", flexShrink: 0 }}>
                         {selectedStaff.photo
                           ? <img src={selectedStaff.photo} alt={selectedStaff.name} style={{ width: 52, height: 52, borderRadius: 13, objectFit: "cover", border: "2px solid #e2e8f0" }} />
-                          : <div style={{ width: 52, height: 52, borderRadius: 13, background: "#e0e7ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, border: "2px solid #e2e8f0" }}>👷</div>
+                          : <Avatar name={selectedStaff.name} size={52} />
                         }
                         {!isReadOnly && (
                           <button onClick={() => { setShowPhotoUpload(selectedStaff); setPhotoUploadType("staff"); setCameraActive(false); }}
@@ -5583,7 +5581,7 @@ export default function App() {
                             <div style={{ position: "relative", flexShrink: 0 }}>
                               {s.photo
                                 ? <img src={s.photo} alt={s.name} style={{ width: 34, height: 34, borderRadius: 9, objectFit: "cover", border: "2px solid #e2e8f0" }} />
-                                : <div style={{ width: 34, height: 34, borderRadius: 9, background: "#e0e7ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, border: "2px solid #e2e8f0" }}>👷</div>
+                                : <Avatar name={st.name} size={34} />
                               }
                               {!isReadOnly && (
                                 <button onClick={e => { e.stopPropagation(); setShowPhotoUpload(s); setPhotoUploadType("staff"); setCameraActive(false); }}
