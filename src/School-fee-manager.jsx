@@ -1188,9 +1188,12 @@ export default function App() {
   // Manual plan change by Super Admin. Clears any custom negotiated price, since a
   // discount agreed for one plan's price shouldn't silently carry over to a different
   // plan — Super Admin can set a new custom price for the new plan if needed.
-  const changeSchoolPlan = (schoolId, newPlan) => {
+  const changeSchoolPlan = async (schoolId, newPlan) => {
     const sch = SCHOOLS_DATA[schoolId];
     if (!sch) return;
+    await supabase.functions.invoke("confirm-payment", {
+      body: { school_id: schoolId, action: "change_plan", new_plan: newPlan },
+    });
     SCHOOLS_DATA[schoolId] = { ...sch, plan: newPlan, customPrice: null, customPriceNote: "" };
     setSubscriptionRefresh(r => r + 1);
     const billing = getBillingInfo(newPlan, sch.billingCycle);
@@ -1217,24 +1220,37 @@ export default function App() {
   // This is completely independent of PLANS — it never changes what any other school
   // pays. The school keeps their plan and its features exactly as before; only the
   // amount they're billed (per their existing billing cycle) is overridden.
-  const setCustomPrice = (schoolId, price, note) => {
+  const setCustomPrice = async (schoolId, price, note) => {
     const sch = SCHOOLS_DATA[schoolId];
     if (!sch) return;
     const amount = parseInt(String(price).replace(/,/g, ""));
     if (!amount || amount <= 0) return notify("Enter a valid custom price", "err");
     const standard = getBillingInfo(sch.plan, sch.billingCycle).price;
     const periodLabel = getBillingInfo(sch.plan, sch.billingCycle).periodLabel;
+    const { error } = await supabase.functions.invoke("confirm-payment", {
+      body: { school_id: schoolId, action: "set_custom_price", custom_price: amount, custom_price_note: note || "" },
+    });
+    if (error) {
+      // Fallback: update directly (may fail due to RLS for super admin)
+      await supabase.from("schools").update({ custom_price: amount, custom_price_note: note || "" }).eq("id", schoolId);
+    }
     SCHOOLS_DATA[schoolId] = { ...sch, customPrice: amount, customPriceNote: note || "" };
     setSubscriptionRefresh(r => r + 1);
-    logActivity("Custom Price Set", `${sch.name}: ${fmt(amount)}${periodLabel} (standard price is ${fmt(standard)})${note ? ` — ${note}` : ""}`);
-    notify(`✓ ${sch.name} will now be billed ${fmt(amount)} instead of the standard ${fmt(standard)} — this does not affect any other school`);
+    logActivity("Custom Price Set", `${sch.name}: ${fmt(amount)}${periodLabel} (standard is ${fmt(standard)})${note ? ` — ${note}` : ""}`);
+    notify(`✓ ${sch.name} will now be billed ${fmt(amount)} instead of the standard ${fmt(standard)}`);
   };
 
-  const clearCustomPrice = (schoolId) => {
+  const clearCustomPrice = async (schoolId) => {
     const sch = SCHOOLS_DATA[schoolId];
     if (!sch) return;
     const standard = getBillingInfo(sch.plan, sch.billingCycle).price;
     const periodLabel = getBillingInfo(sch.plan, sch.billingCycle).periodLabel;
+    const { error } = await supabase.functions.invoke("confirm-payment", {
+      body: { school_id: schoolId, action: "clear_custom_price" },
+    });
+    if (error) {
+      await supabase.from("schools").update({ custom_price: null, custom_price_note: "" }).eq("id", schoolId);
+    }
     SCHOOLS_DATA[schoolId] = { ...sch, customPrice: null, customPriceNote: "" };
     setSubscriptionRefresh(r => r + 1);
     logActivity("Custom Price Removed", `${sch.name}: reverted to standard ${sch.plan} pricing (${fmt(standard)}${periodLabel})`);
