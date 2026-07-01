@@ -454,7 +454,8 @@ export default function App() {
   const [expenseSearch, setExpenseSearch] = useState("");
   const [expenseTermFilter, setExpenseTermFilter] = useState("current");
   const [reportsTerm, setReportsTerm] = useState(null);
-  const [alumniSearch, setAlumniSearch] = useState(""); // null = use currentTerm
+  const [alumniSearch, setAlumniSearch] = useState("");
+  const [parentShowAllTerms, setParentShowAllTerms] = useState(false); // null = use currentTerm
 
   const [showReceipt, setShowReceipt] = useState(null);
   const [showRollover, setShowRollover] = useState(false);
@@ -4211,7 +4212,7 @@ export default function App() {
             <div style={{ ...card, marginTop: 20 }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", marginBottom: 4 }}>📜 Activity Log</div>
               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>
-                A record of approvals, plan changes, payment confirmations, and other administrative actions taken in this session.
+                A persistent record of all approvals, plan changes, payment confirmations and other administrative actions. Survives page reloads.
               </div>
               {activityLog.length === 0 ? (
                 <div style={{ textAlign: "center", padding: 24, color: "#94a3b8", fontSize: 13 }}>No activity recorded yet this session.</div>
@@ -4228,9 +4229,6 @@ export default function App() {
                   ))}
                 </div>
               )}
-              <div style={{ marginTop: 12, padding: "10px 14px", background: "#f8fafc", borderRadius: 9, fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>
-                Note: this log resets when the page is reloaded. Once the real backend is connected, this becomes a persistent audit trail stored in the database.
-              </div>
             </div>
           </div>
           )}
@@ -4265,7 +4263,7 @@ export default function App() {
 
               <div style={{ display: "flex", gap: 10 }}>
                 <button onClick={() => setShowCustomPriceEdit(null)} style={{ flex: 1, padding: 11, borderRadius: 9, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>Cancel</button>
-                <button onClick={() => { setCustomPrice(sch.id, customPriceForm.price, customPriceForm.note); setShowCustomPriceEdit(null); }}
+                <button onClick={async () => { await setCustomPrice(sch.id, customPriceForm.price, customPriceForm.note); setShowCustomPriceEdit(null); }}
                   style={{ flex: 1, padding: 11, borderRadius: 9, border: "none", background: "#7c3aed", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Save Custom Price</button>
               </div>
             </div>
@@ -4370,24 +4368,40 @@ export default function App() {
           </div>
 
           <div style={{ ...card }}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", marginBottom: 16 }}>📋 Payment History — {currentTerm}</div>
-            {myPayments.length === 0
-              ? <div style={{ textAlign: "center", padding: 30, color: "#94a3b8" }}>No payments recorded this term</div>
-              : myPayments.map((p, i) => (
-                <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: i < myPayments.length - 1 ? "1px solid #f1f5f9" : "none" }}>
-                  <div>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
-                      <span style={{ fontFamily: "monospace", fontSize: 12, color: "#3b82f6", fontWeight: 700, background: "#eff6ff", padding: "1px 7px", borderRadius: 5 }}>{p.id}</span>
-                      <span style={{ fontSize: 12, color: "#374151" }}>{METHOD_ICON[p.method]} {p.method}</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a" }}>📋 Payment History</div>
+              <button onClick={() => setParentShowAllTerms(p => !p)}
+                style={{ fontSize: 11, color: "#3b82f6", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 7, padding: "4px 10px", cursor: "pointer", fontWeight: 600 }}>
+                {parentShowAllTerms ? `Current Term (${currentTerm})` : "Show All Terms"}
+              </button>
+            </div>
+            {(() => {
+              const displayPayments = parentShowAllTerms ? myStudent.payments : myPayments;
+              return displayPayments.length === 0
+                ? <div style={{ textAlign: "center", padding: 30, color: "#94a3b8" }}>No payments recorded {parentShowAllTerms ? "" : "this term"}</div>
+                : displayPayments.map((p, i) => (
+                  <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: i < displayPayments.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                    <div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+                        <span style={{ fontFamily: "monospace", fontSize: 12, color: "#3b82f6", fontWeight: 700, background: "#eff6ff", padding: "1px 7px", borderRadius: 5 }}>{p.id}</span>
+                        <span style={{ fontSize: 12, color: "#374151" }}>{METHOD_ICON[p.method]} {p.method}</span>
+                        {parentShowAllTerms && <span style={{ fontSize: 10, color: "#7c3aed", background: "#f5f3ff", borderRadius: 5, padding: "1px 6px", fontWeight: 700 }}>{p.term}</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>📅 {fmtDate(p.date)} · Received by {p.receivedBy}</div>
                     </div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>📅 {fmtDate(p.date)} · Received by {p.receivedBy}</div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: "#15803d" }}>{fmt(p.amount)}</div>
+                      <button onClick={() => setShowReceipt({ payment: p, student: myStudent, school, newBalance: myBal })}
+                        style={{ fontSize: 11, color: "#3b82f6", background: "none", border: "1px solid #bfdbfe", borderRadius: 5, padding: "2px 8px", cursor: "pointer", marginTop: 4 }}>
+                        Receipt
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#15803d" }}>{fmt(p.amount)}</div>
-                </div>
-              ))}
+                ));
+            })()}
             <div style={{ marginTop: 16, padding: "12px 16px", background: "#f0fdf4", borderRadius: 10, display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#15803d" }}>Total Paid This Term</span>
-              <span style={{ fontSize: 16, fontWeight: 800, color: "#15803d" }}>{fmt(myPaid)}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#15803d" }}>Total Paid {parentShowAllTerms ? "All Time" : "This Term"}</span>
+              <span style={{ fontSize: 16, fontWeight: 800, color: "#15803d" }}>{fmt(parentShowAllTerms ? myStudent.payments.reduce((a, p) => a + p.amount, 0) : myPaid)}</span>
             </div>
           </div>
         </div>
