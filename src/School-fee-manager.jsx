@@ -3526,19 +3526,71 @@ export default function App() {
   }
   if (!currentUser) {
     return (
-      <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Plus Jakarta Sans',sans-serif", padding: 20 }}>
+      <div style={{ minHeight: "100vh", display: "flex", fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-        <div style={{ background: "#fff", borderRadius: 20, padding: isMobile ? 24 : 40, width: isMobile ? "100%" : (loginScreen === "signup" ? 460 : 380), maxWidth: loginScreen === "signup" ? 460 : 380, boxShadow: "0 32px 80px rgba(0,0,0,0.3)", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
-          <div style={{ textAlign: "center", marginBottom: 28 }}>
-            <div style={{ fontSize: 44, marginBottom: 8 }}>🏫</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a" }}>FeeTrack UG</div>
-            <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>School Finance Management System</div>
+
+        {/* Left panel — branding, only on desktop */}
+        {!isMobile && (
+          <div style={{ flex: 1, background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#1e40af 100%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 60, position: "relative", overflow: "hidden" }}>
+            {/* Decorative circles */}
+            <div style={{ position: "absolute", top: -80, right: -80, width: 300, height: 300, borderRadius: "50%", background: "rgba(255,255,255,0.03)" }} />
+            <div style={{ position: "absolute", bottom: -60, left: -60, width: 240, height: 240, borderRadius: "50%", background: "rgba(255,255,255,0.04)" }} />
+
+            <div style={{ position: "relative", zIndex: 1, maxWidth: 420 }}>
+              <div style={{ fontSize: 64, marginBottom: 24 }}>🏫</div>
+              <div style={{ fontSize: 36, fontWeight: 800, color: "#fff", marginBottom: 12, lineHeight: 1.2 }}>FeeTrack UG</div>
+              <div style={{ fontSize: 16, color: "#94a3b8", marginBottom: 40, lineHeight: 1.6 }}>
+                School Finance Management System for Uganda. Track fees, manage staff wages, and generate reports — all in one place.
+              </div>
+
+              {[
+                { icon: "💰", title: "Fee Collection Tracking", desc: "Record payments, issue receipts, track balances per student" },
+                { icon: "👷", title: "Staff & Wages", desc: "Manage your teachers and support staff payroll" },
+                { icon: "📊", title: "Financial Reports", desc: "Excel exports, class-by-class collection rates" },
+                { icon: "👨‍👩‍👧", title: "Parent Portal", desc: "Parents check balances and payment history by phone" },
+              ].map((f, i) => (
+                <div key={i} style={{ display: "flex", gap: 14, marginBottom: 20 }}>
+                  <div style={{ fontSize: 24, flexShrink: 0, marginTop: 2 }}>{f.icon}</div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#f1f5f9" }}>{f.title}</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{f.desc}</div>
+                  </div>
+                </div>
+              ))}
+
+              <div style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid rgba(255,255,255,0.1)", fontSize: 12, color: "#475569" }}>
+                © 2025 FeeTrack UG · feetrackug.com
+              </div>
+            </div>
           </div>
+        )}
+
+        {/* Right panel — login form */}
+        <div style={{ width: isMobile ? "100%" : (loginScreen === "signup" ? 520 : 460), background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: isMobile ? 24 : 48, overflowY: "auto", minHeight: "100vh" }}>
+          <div style={{ width: "100%", maxWidth: loginScreen === "signup" ? 420 : 380 }}>
+            {isMobile && (
+              <div style={{ textAlign: "center", marginBottom: 28 }}>
+                <div style={{ fontSize: 44, marginBottom: 8 }}>🏫</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a" }}>FeeTrack UG</div>
+                <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>School Finance Management System</div>
+              </div>
+            )}
+
+          {!isMobile && (
+            <div style={{ marginBottom: 32 }}>
+              <div style={{ fontSize: 26, fontWeight: 800, color: "#0f172a", marginBottom: 6 }}>
+                {loginScreen === "signup" ? "Register Your School" : loginScreen === "parent" ? "Parent Login" : "Welcome back"}
+              </div>
+              <div style={{ fontSize: 14, color: "#64748b" }}>
+                {loginScreen === "signup" ? "Fill in your school details below" : loginScreen === "parent" ? "Enter your phone number to view your child's fees" : "Sign in to your FeeTrack account"}
+              </div>
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: 6, marginBottom: 24, background: "#f1f5f9", borderRadius: 10, padding: 4 }}>
             {["admin", "parent", "signup"].map(t => (
               <button key={t} onClick={() => { setLoginScreen(t); setLoginError(""); setSignupSubmitted(false); }} style={{ flex: 1, padding: "8px 4px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 12, background: loginScreen === t ? "#fff" : "transparent", color: loginScreen === t ? "#0f172a" : "#64748b", boxShadow: loginScreen === t ? "0 1px 4px rgba(0,0,0,0.1)" : "none" }}>
-                {t === "admin" ? "🔑 Admin" : t === "parent" ? "👨‍👩‍👧 Parent" : "🏫 Sign Up School"}
+                {t === "admin" ? "🔑 Admin" : t === "parent" ? "👨‍👩‍👧 Parent" : "🏫 Sign Up"}
               </button>
             ))}
           </div>
@@ -3706,6 +3758,7 @@ export default function App() {
               </div>
             )
           )}
+          </div>
         </div>
       </div>
     );
