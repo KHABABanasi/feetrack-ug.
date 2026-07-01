@@ -788,6 +788,22 @@ export default function App() {
   // pointless, since the real loading path was already handling this
   // correctly elsewhere.
 
+  // ── Browser history support — makes the back button navigate between tabs ──
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== "admin") return;
+    window.history.pushState({ tab }, "", window.location.pathname);
+  }, [tab]);
+
+  useEffect(() => {
+    const handlePopState = (e) => {
+      if (e.state && e.state.tab && currentUser?.role === "admin") {
+        setTab(e.state.tab);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [currentUser]);
+
   // Persist currentTerm to localStorage so it survives page refreshes
   useEffect(() => {
     try { localStorage.setItem("feetrack_current_term", currentTerm); } catch {}
