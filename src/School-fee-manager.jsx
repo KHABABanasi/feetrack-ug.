@@ -4094,9 +4094,11 @@ export default function App() {
                   p_new_password: superPwForm.newPw || null,
                 });
                 if (error) return setSuperPwError(`Could not update: ${error.message}`);
-                if (!data) return setSuperPwError("Current password is incorrect.");
+                // RPC returns boolean directly (not wrapped in array)
+                if (data === false || data === null) return setSuperPwError("Current password is incorrect.");
                 setSuperAdminCreds(prev => ({ ...prev, password: superPwForm.newPw || prev.password, username: superPwForm.newUsername.trim() || prev.username }));
                 setSuperPwForm({ currentPw: "", newPw: "", confirmPw: "", newUsername: "" });
+                setSuperPwError("");
                 notify("✓ Super admin login updated");
               }} style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 9, padding: "10px 20px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
                 Save Changes
