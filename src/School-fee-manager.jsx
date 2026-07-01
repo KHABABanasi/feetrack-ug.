@@ -338,6 +338,39 @@ const Pill = ({ text, bg = "#eff6ff", col = "#2563eb" }) => (
   <span style={{ background: bg, color: col, padding: "2px 9px", borderRadius: 99, fontSize: 11, fontWeight: 700 }}>{text}</span>
 );
 
+// Initials avatar — replaces emoji placeholders for students and staff
+const Avatar = ({ name = "", gender = "M", size = 36, photo = null }) => {
+  if (photo) return <img src={photo} alt={name} style={{ width: size, height: size, borderRadius: size * 0.3, objectFit: "cover", display: "block" }} />;
+  const initials = name.trim().split(" ").filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || (gender === "F" ? "F" : "M");
+  const colors = [
+    ["#dbeafe","#1d4ed8"], ["#dcfce7","#15803d"], ["#fef3c7","#92400e"],
+    ["#fce7f3","#be185d"], ["#ede9fe","#6d28d9"], ["#ffedd5","#c2410c"],
+    ["#e0f2fe","#0369a1"], ["#d1fae5","#065f46"],
+  ];
+  const [bg, col] = colors[(name.charCodeAt(0) || 0) % colors.length];
+  return (
+    <div style={{ width: size, height: size, borderRadius: size * 0.3, background: bg, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: size * 0.38, color: col, flexShrink: 0, userSelect: "none" }}>
+      {initials}
+    </div>
+  );
+};
+
+// FeeTrack UG logo — Concept 5 (FT wordmark)
+const FeeTrackLogo = ({ size = 36 }) => (
+  <svg width={size} height={size} viewBox="0 0 120 120" style={{ display: "block", flexShrink: 0 }}>
+    <defs>
+      <linearGradient id="ftg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#0f172a"/>
+        <stop offset="100%" stopColor="#1e3a5f"/>
+      </linearGradient>
+    </defs>
+    <rect width="120" height="120" rx="20" fill="url(#ftg)"/>
+    <rect x="16" y="24" width="88" height="8" rx="4" fill="#f59e0b"/>
+    <text x="60" y="84" textAnchor="middle" fontFamily="Arial Black, Arial" fontWeight="900" fontSize="52" fill="#fff">FT</text>
+    <rect x="16" y="94" width="88" height="4" rx="2" fill="#3b82f6"/>
+  </svg>
+);
+
 // ── SMS Log Store ─────────────────────────────────────────────────────────────
 const buildSMS = (student, payment, school, balance) =>
   `Dear ${student.parent}, UGX ${payment.amount.toLocaleString()} received for ${student.name} (${student.class}) on ${fmtDate(payment.date)}. Balance: UGX ${balance.toLocaleString()}. Ref: ${payment.id}. ${school.name.split(" ").slice(0, 2).join(" ")}.`;
@@ -3537,7 +3570,7 @@ export default function App() {
             <div style={{ position: "absolute", bottom: -60, left: -60, width: 240, height: 240, borderRadius: "50%", background: "rgba(255,255,255,0.04)" }} />
 
             <div style={{ position: "relative", zIndex: 1, maxWidth: 420 }}>
-              <div style={{ fontSize: 64, marginBottom: 24 }}>🏫</div>
+              <div style={{ marginBottom: 24 }}><FeeTrackLogo size={64} /></div>
               <div style={{ fontSize: 36, fontWeight: 800, color: "#fff", marginBottom: 12, lineHeight: 1.2 }}>FeeTrack UG</div>
               <div style={{ fontSize: 16, color: "#94a3b8", marginBottom: 40, lineHeight: 1.6 }}>
                 School Finance Management System for Uganda. Track fees, manage staff wages, and generate reports — all in one place.
@@ -3570,7 +3603,7 @@ export default function App() {
           <div style={{ width: "100%", maxWidth: loginScreen === "signup" ? 420 : 380 }}>
             {isMobile && (
               <div style={{ textAlign: "center", marginBottom: 28 }}>
-                <div style={{ fontSize: 44, marginBottom: 8 }}>🏫</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><FeeTrackLogo size={56} /></div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a" }}>FeeTrack UG</div>
                 <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>School Finance Management System</div>
               </div>
@@ -4398,7 +4431,7 @@ export default function App() {
                       }}>
                       {child.photo
                         ? <img src={child.photo} alt={child.name} style={{ width: 28, height: 28, borderRadius: 8, objectFit: "cover" }} />
-                        : <span style={{ fontSize: 18 }}>{child.gender === "F" ? "👩" : "👨"}</span>}
+                        : <Avatar name={child.name} gender={child.gender} size={28} />}
                       <div style={{ textAlign: "left" }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: isActive ? "#92400e" : "#0f172a" }}>{child.name}</div>
                         <div style={{ fontSize: 10, color: "#94a3b8" }}>{child.class} · {childBal > 0 ? `Owes ${fmt(childBal)}` : "Fully paid"}</div>
@@ -4414,7 +4447,7 @@ export default function App() {
             <div style={{ width: 60, height: 60, borderRadius: 16, background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, overflow: "hidden", flexShrink: 0 }}>
               {myStudent.photo
                 ? <img src={myStudent.photo} alt={myStudent.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                : (myStudent.gender === "F" ? "👩" : "👨")}
+                : <Avatar name={myStudent.name} gender={myStudent.gender} size={60} />}
             </div>
             <div style={{ flex: "1 1 200px" }}>
               <div style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>{myStudent.name}</div>
@@ -4523,7 +4556,7 @@ export default function App() {
             ☰
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>🏫</span>
+            <FeeTrackLogo size={28} />
             <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 13 }}>FeeTrack UG</div>
           </div>
           <div style={{ width: 34 }} />
@@ -4545,7 +4578,7 @@ export default function App() {
         <div style={{ padding: "22px 18px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#f59e0b,#ef4444)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🏫</div>
+              <div style={{ width: 36, height: 36, borderRadius: 10, overflow: "hidden" }}><FeeTrackLogo size={36} /></div>
               <div>
                 <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 13 }}>FeeTrack UG</div>
                 <div style={{ color: "#475569", fontSize: 10 }}>School Finance</div>
@@ -5086,7 +5119,7 @@ export default function App() {
                           {s.photo
                             ? <img src={s.photo} alt={s.name} style={{ width: 38, height: 38, borderRadius: 10, objectFit: "cover", border: "2px solid #e2e8f0" }} />
                             : <div style={{ width: 38, height: 38, borderRadius: 10, background: s.gender === "F" ? "#fce7f3" : "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, border: "2px solid #e2e8f0" }}>
-                                {s.gender === "F" ? "👩" : "👨"}
+                                {s.gender === "F" ? <Avatar name={s.name} gender="F" size={28} /> : <Avatar name={s.name} gender="M" size={28} />}
                               </div>
                           }
                           <button onClick={e => { e.stopPropagation(); setShowPhotoUpload(s); setPhotoUploadType("student"); setCameraActive(false); }}
@@ -6562,7 +6595,7 @@ export default function App() {
                       <div onClick={() => setExpandedAlumni(isOpen ? null : a.id)}
                         style={{ display: "grid", gridTemplateColumns: "2fr 0.6fr 0.6fr 0.6fr 1fr 1fr 0.6fr", gap: 8, alignItems: "center", padding: "12px 18px", borderTop: i > 0 ? "1px solid #f1f5f9" : "none", background: isOpen ? "#f8f4ff" : i % 2 === 0 ? "#fff" : "#fafbfc", cursor: "pointer" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 18 }}>{a.gender === "F" ? "👩" : "👨"}</span>
+                          <Avatar name={a.name} gender={a.gender} size={28} />
                           <div>
                             <div style={{ fontWeight: 600, fontSize: 13, color: "#0f172a" }}>{a.name}</div>
                             <div style={{ fontSize: 11, color: "#94a3b8" }}>{a.parent} · {a.phone}</div>
@@ -7198,7 +7231,7 @@ export default function App() {
                 showPhotoUpload.photo
                   ? <img src={showPhotoUpload.photo} alt="Current" style={{ width: 140, height: 140, borderRadius: 14, objectFit: "cover", border: "3px solid #e2e8f0" }} />
                   : <div style={{ width: 140, height: 140, borderRadius: 14, background: photoUploadType === "staff" ? "#e0e7ff" : (showPhotoUpload.gender === "F" ? "#fce7f3" : "#dbeafe"), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 64 }}>
-                      {photoUploadType === "staff" ? "👷" : (showPhotoUpload.gender === "F" ? "👩" : "👨")}
+                      {photoUploadType === "staff" ? <Avatar name={showPhotoUpload.name} size={48} /> : <Avatar name={showPhotoUpload.name} gender={showPhotoUpload.gender} size={48} />}
                     </div>
               )}
             </div>
@@ -7733,7 +7766,7 @@ export default function App() {
                       <div key={r.rowIndex} style={{ display: "grid", gridTemplateColumns: "1.4fr 0.5fr 0.5fr 0.9fr 1.1fr 1.1fr 0.7fr 1.2fr", gap: 4, alignItems: "center", padding: "7px 12px", borderTop: "1px solid #f1f5f9", background: i % 2 === 0 ? "#fff" : "#fafbfc", fontSize: 12 }}>
                         <div style={{ fontWeight: 600, color: "#0f172a" }}>{r.name}</div>
                         <div><Pill text={r.class} /></div>
-                        <div>{r.gender === "F" ? "👩" : "👨"}</div>
+                        <div><Avatar name={r.name} gender={r.gender} size={24} /></div>
                         <div style={{ fontSize: 11, color: "#64748b" }}>{r.category}</div>
                         <div style={{ fontSize: 11 }}>{r.parent}</div>
                         <div style={{ fontSize: 11, fontFamily: "monospace" }}>{r.phone || "—"}</div>
@@ -7814,7 +7847,7 @@ export default function App() {
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   {returningMatch.photo
                     ? <img src={returningMatch.photo} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover" }} />
-                    : <span style={{ fontSize: 24 }}>{returningMatch.gender === "F" ? "👩" : "👨"}</span>}
+                    : <Avatar name={returningMatch.name} gender={returningMatch.gender} size={24} />}
                   <div>
                     <div style={{ fontWeight: 800, fontSize: 13, color: "#6d28d9" }}>🎓 Returning Student Found in Alumni!</div>
                     <div style={{ fontSize: 11, color: "#7c3aed" }}>
@@ -8174,7 +8207,7 @@ export default function App() {
                             return (
                               <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", borderRadius: 8, marginBottom: 4, background: isDNR ? "#fef2f2" : "#fff", border: `1px solid ${isDNR ? "#fca5a5" : "#e2e8f0"}` }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                  {s.photo ? <img src={s.photo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "cover" }} /> : <span style={{ fontSize: 16 }}>{s.gender === "F" ? "👩" : "👨"}</span>}
+                                  {s.photo ? <img src={s.photo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "cover" }} /> : <Avatar name={s.name} gender={s.gender} size={24} />}
                                   <div>
                                     <span style={{ fontSize: 12, fontWeight: 600, color: isDNR ? "#b91c1c" : "#0f172a" }}>{s.name}</span>
                                     {s.stream && <span style={{ marginLeft: 6 }}><Pill text={s.stream} bg="#f5f3ff" col="#7c3aed" /></span>}
@@ -8254,7 +8287,7 @@ export default function App() {
                         return (
                           <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", borderRadius: 8, marginBottom: 4, background: rowBg, border: `1px solid ${rowBorder}`, flexWrap: "wrap", gap: 6 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              {s.photo ? <img src={s.photo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "cover" }} /> : <span style={{ fontSize: 16 }}>{s.gender === "F" ? "👩" : "👨"}</span>}
+                              {s.photo ? <img src={s.photo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "cover" }} /> : <Avatar name={s.name} gender={s.gender} size={24} />}
                               <div>
                                 <span style={{ fontSize: 12, fontWeight: 600, color: nameColor }}>{s.name}{s.stream ? ` (${classLabel(cls, s.stream)})` : ""}</span>
                                 {isRepeating && <span style={{ fontSize: 10, color: "#92400e", marginLeft: 6, fontWeight: 700 }}>repeating {cls}</span>}
@@ -8295,7 +8328,7 @@ export default function App() {
                     return (
                       <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "#374151", padding: "6px 0", borderBottom: "1px solid #dbeafe", flexWrap: "wrap", gap: 6 }}>
                         <div>
-                          <span style={{ fontWeight: 600 }}>{s.gender === "F" ? "👩" : "👨"} {s.name}</span>
+                          <span style={{ fontWeight: 600 }}><Avatar name={s.name} gender={s.gender} size={18} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 6 }} /> {s.name}</span>
                           {isRepeating && <span style={{ fontSize: 10, color: "#92400e", marginLeft: 6, fontWeight: 700 }}>repeating {lastClass}</span>}
                         </div>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -8328,7 +8361,7 @@ export default function App() {
                       return (
                         <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #fde68a", flexWrap: "wrap", gap: 8 }}>
                           <div>
-                            <div style={{ fontWeight: 600, fontSize: 13, color: "#0f172a" }}>{s.gender === "F" ? "👩" : "👨"} {s.name}</div>
+                            <div style={{ fontWeight: 600, fontSize: 13, color: "#0f172a", display: "flex", alignItems: "center", gap: 6 }}><Avatar name={s.name} gender={s.gender} size={20} /> {s.name}</div>
                             {isRepeating
                               ? <div style={{ fontSize: 11, color: "#92400e", fontWeight: 600 }}>↻ Repeating {cls}{debt > 0 ? ` — owes ${fmt(debt)}, carried as arrears` : ""}</div>
                               : debt > 0
