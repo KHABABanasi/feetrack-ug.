@@ -1022,11 +1022,15 @@ export default function App() {
 
   const handleSignupSubmit = async () => {
     const { schoolName, location, principal, phone, email, students, schoolType, billingCycle, username, password, confirmPassword } = signupForm;
-    if (!schoolName.trim() || !principal.trim() || !phone.trim() || !username.trim() || !password.trim()) {
+    if (!schoolName.trim() || !location.trim() || !principal.trim() || !phone.trim() || !username.trim() || !password.trim()) {
       return notify("Please fill all required fields", "err");
     }
     if (password.length < 6) return notify("Password must be at least 6 characters", "err");
     if (password !== confirmPassword) return notify("Passwords do not match", "err");
+
+    // Check username isn't already taken by an approved school
+    const { data: existing } = await supabase.rpc("get_school_email_by_username", { p_username: username.trim() });
+    if (existing) return notify("That username is already taken — please choose a different one", "err");
 
     const { data, error } = await supabase.from("pending_signups").insert({
       school_name: schoolName, location, principal, phone, email,
